@@ -1,18 +1,23 @@
-# src/app.py
 from pathlib import Path
+import os
 import joblib
+import xgboost as xgb
 import pandas as pd
 from fastapi import FastAPI, HTTPException
 
 app = FastAPI()
 
-BASE_DIR = Path(__file__).resolve().parent  # src/
-MODEL_PATH = BASE_DIR / "model.joblib"
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
-if not MODEL_PATH.exists():
-    raise FileNotFoundError(f"Missing model file: {MODEL_PATH}")
+# If you commit artifacts into repo: /models
+ARTIFACT_DIR = Path(os.getenv("ARTIFACT_DIR", REPO_ROOT / "models"))
 
-model = joblib.load(MODEL_PATH)
+# Expose these names because tests import them
+PREPROCESSOR_PATH = ARTIFACT_DIR / "model.joblib"
+MODEL_PATH = ARTIFACT_DIR / "eta_xgb.json"
+
+pre = None
+model = None
 
 FEATURE_ORDER = [
     "event_ts",
@@ -24,30 +29,45 @@ FEATURE_ORDER = [
     "baseline_queue_min",
 ]
 
+@app.on_event("startup")
+def load_artifacts():
+    global pre, model
+
+    if not PREPROCESSOR_PATH.exists():
+        raise RuntimeError(f"Missing preprocessor: {PREPROCESSOR_PATH}")
+
+    if not MODEL_PATH.exists():
+        raise RuntimeError(f"Missing model: {MODEL_PATH}")
+
+    pre = joblib.load(PREPROCESSOR_PATH)
+
+    model = xgb.XGBRegressor()
+    model.load_model(str(MODEL_PATH))
+
 @app.get("/health")
 def health():
     return {
         "status": "ok",
+        "preprocessor_loaded": pre is not None,
         "model_loaded": model is not None,
-        "model_type": type(model).__name__,
-        "model_path": str(MODEL_PATH),
     }
 
 @app.post("/predict")
-def predict(data: dict):
-    if model is None:
-        raise HTTPException(status_code=503, detail="Model not loaded")
-
-    missing = [f for f in FEATURE_ORDER if f not in data]
-    if missing:
-        raise HTTPException(status_code=400, detail=f"Missing fields: {missing}")
-
-    X = pd.DataFrame([{k: data[k] for k in FEATURE_ORDER}])
-
+def predict(payload: dict):
     try:
-        yhat = model.predict(X)
-        y = float(yhat[0])
+        if pre is None or model is None:
+            raise HTTPException(status_code=503, detail="Model not loaded")
+
+        missing = [k for k in FEATURE_ORDER if k not in payload]
+        if missing:
+            raise HTTPException(status_code=400, detail=f"Missing fields: {missing}")
+
+        X = pd.DataFrame([{k: payload[k] for k in FEATURE_ORDER}])
+        X_enc = pre.transform(X)
+        yhat = float(model.predict(X_enc)[0])
+        return {"prediction": yhat}
+
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Prediction failed: {type(e).__name__}: {e}")
-
-    return {"prediction": y}
