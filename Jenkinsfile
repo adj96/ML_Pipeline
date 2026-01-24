@@ -51,31 +51,27 @@ pipeline {
       }
     }
 
-    stage('QA (Unit Tests)') {
-      steps {
-        bat '''
-          @echo on
-          py -3.11 -V
+stage('QA (Unit Tests)') {
+  steps {
+    bat '''
+      @echo on
+      if not exist reports mkdir reports
 
-          if exist .venv rmdir /s /q .venv
-          py -3.11 -m venv .venv
+      docker build -t %IMAGE_REPO%:test-%SHORTSHA% -f Dockerfile.test .
 
-          .\\.venv\\Scripts\\python -m pip install --upgrade pip setuptools wheel
-          .\\.venv\\Scripts\\python -m pip install -r requirements.txt
-          .\\.venv\\Scripts\\python -m pip install pytest
-
-          if not exist reports mkdir reports
-          .\\.venv\\Scripts\\python -m pytest -q --junitxml=reports\\test-results.xml
-          dir reports
-        '''
-      }
-      post {
-        always {
-          junit 'reports/test-results.xml'
-          archiveArtifacts artifacts: 'reports/test-results.xml', fingerprint: true
-        }
-      }
+      docker run --rm ^
+        -v "%WORKSPACE%\\reports:/reports" ^
+        %IMAGE_REPO%:test-%SHORTSHA%
+    '''
+  }
+  post {
+    always {
+      junit 'reports/test-results.xml'
+      archiveArtifacts artifacts: 'reports/test-results.xml', fingerprint: true
+      bat 'docker image rm -f %IMAGE_REPO%:test-%SHORTSHA% 2>nul || exit /b 0'
     }
+  }
+}
 
     stage('Build Image') {
       steps {
