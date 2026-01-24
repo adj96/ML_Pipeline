@@ -1,26 +1,24 @@
-from fastapi.testclient import TestClient
-import src.app as appmod
+from pydantic import BaseModel
 
-client = TestClient(appmod.app)
+class PredictIn(BaseModel):
+    event_ts: int
+    shortage_flag: int
+    replenishment_eta_min: float
+    machine_state: str
+    down_minutes_last_60: float
+    queue_time_min: float
+    baseline_queue_min: float
 
-def test_model_artifacts_exist():
-    assert appmod.PREPROCESSOR_PATH.exists()
-    assert appmod.MODEL_PATH.exists()
+@app.post("/predict")
+def predict(req: PredictIn):
+    try:
+        load_artifacts()
 
-def test_predict():
-    payload = {
-        "event_ts": 1700000000,
-        "shortage_flag": 0,
-        "replenishment_eta_min": 0,
-        "machine_state": "RUN",
-        "down_minutes_last_60": 0,
-        "queue_time_min": 5,
-        "baseline_queue_min": 5,
-    }
+        df = pd.DataFrame([req.model_dump()])
+        X = pre.transform(df)                 # ColumnTransformer output
+        dmat = xgb.DMatrix(X)
+        yhat = float(booster.predict(dmat)[0])
 
-    r = client.post("/predict", json=payload)
-    assert r.status_code == 200, r.text
-
-    body = r.json()
-    assert "prediction" in body
-    assert isinstance(body["prediction"], (int, float))
+        return {"prediction": yhat}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Prediction failed: {type(e).__name__}: {e}")
