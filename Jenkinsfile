@@ -5,7 +5,7 @@ pipeline {
 
   environment {
     // Docker Hub repo (must exist under your Docker Hub username)
-    IMAGE_REPO = "katiravan/arvmldevopspipeline"
+    IMAGE_REPO = "arvind2733/arvmldevopspipeline"
 
     // Kubernetes identity
     NAMESPACE  = "arvmldevopspipeline"
