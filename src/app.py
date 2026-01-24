@@ -12,7 +12,7 @@ app = FastAPI()
 
 _pipeline = None
 model_loaded = False
-preprocessor_loaded = False  # will mirror model_loaded when pipeline includes preprocessing
+preprocessor_loaded = False  # mirror model_loaded (single artifact contains everything)
 
 
 class PredictRequest(BaseModel):
@@ -25,19 +25,32 @@ class PredictRequest(BaseModel):
     baseline_queue_min: float
 
 
-@app.on_event("startup")
-def _load_artifacts():
+def _safe_load_model():
     global _pipeline, model_loaded, preprocessor_loaded
-    if not os.path.exists(MODEL_PATH):
+    try:
+        if not os.path.exists(MODEL_PATH):
+            _pipeline = None
+            model_loaded = False
+            preprocessor_loaded = False
+            return
+
+        _pipeline = joblib.load(MODEL_PATH)
+        model_loaded = True
+        preprocessor_loaded = True
+    except Exception:
         _pipeline = None
         model_loaded = False
         preprocessor_loaded = False
-        return
 
-    _pipeline = joblib.load(MODEL_PATH)
-    model_loaded = True
-    # If model.joblib is a full sklearn Pipeline, preprocessing is inside it.
-    preprocessor_loaded = True
+
+# Load at import-time so pytest/TestClient does not depend on startup hooks
+_safe_load_model()
+
+
+@app.on_event("startup")
+def _startup_load():
+    # Also load on real app startup (harmless if already loaded)
+    _safe_load_model()
 
 
 @app.get("/health")
@@ -56,5 +69,4 @@ def predict(req: PredictRequest):
 
     df = pd.DataFrame([req.model_dump()])
     yhat = _pipeline.predict(df)
-
     return {"prediction": float(yhat[0])}
