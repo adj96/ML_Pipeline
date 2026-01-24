@@ -22,7 +22,6 @@ pipeline {
 
     stage('Checkout') {
       steps {
-        checkout scm
         bat '''
           @echo on
           git --version
