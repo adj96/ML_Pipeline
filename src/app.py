@@ -1,47 +1,60 @@
 # src/app.py
 import os
-from pathlib import Path
-
 import joblib
 import pandas as pd
-import xgboost as xgb
 from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+
+APP_DIR = os.path.dirname(__file__)
+MODEL_PATH = os.path.join(APP_DIR, "model.joblib")
 
 app = FastAPI()
 
-HERE = Path(__file__).resolve().parent
+_pipeline = None
+model_loaded = False
+preprocessor_loaded = False  # will mirror model_loaded when pipeline includes preprocessing
 
-# Default: artifacts are next to app.py (your current repo layout: src/model.joblib, src/eta_xgb.json)
-ARTIFACT_DIR = Path(os.getenv("ARTIFACT_DIR", str(HERE)))
 
-PREPROCESSOR_PATH = ARTIFACT_DIR / "model.joblib"
-MODEL_PATH = ARTIFACT_DIR / "eta_xgb.json"
+class PredictRequest(BaseModel):
+    event_ts: int
+    shortage_flag: int
+    replenishment_eta_min: float
+    machine_state: str
+    down_minutes_last_60: float
+    queue_time_min: float
+    baseline_queue_min: float
 
-pre = None
-booster = None
-
-def load_artifacts():
-    global pre, booster
-    if pre is None:
-        pre = joblib.load(PREPROCESSOR_PATH)
-    if booster is None:
-        booster = xgb.Booster()
-        booster.load_model(str(MODEL_PATH))
 
 @app.on_event("startup")
-def _startup():
-    # Try to load on startup; if missing, health will show False
-    try:
-        load_artifacts()
-    except Exception:
-        pass
+def _load_artifacts():
+    global _pipeline, model_loaded, preprocessor_loaded
+    if not os.path.exists(MODEL_PATH):
+        _pipeline = None
+        model_loaded = False
+        preprocessor_loaded = False
+        return
+
+    _pipeline = joblib.load(MODEL_PATH)
+    model_loaded = True
+    # If model.joblib is a full sklearn Pipeline, preprocessing is inside it.
+    preprocessor_loaded = True
+
 
 @app.get("/health")
 def health():
     return {
         "status": "ok",
-        "preprocessor_loaded": pre is not None,
-        "model_loaded": booster is not None,
-        "preprocessor_path": str(PREPROCESSOR_PATH),
-        "model_path": str(MODEL_PATH),
+        "model_loaded": model_loaded,
+        "preprocessor_loaded": preprocessor_loaded,
     }
+
+
+@app.post("/predict")
+def predict(req: PredictRequest):
+    if _pipeline is None:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+
+    df = pd.DataFrame([req.model_dump()])
+    yhat = _pipeline.predict(df)
+
+    return {"prediction": float(yhat[0])}
