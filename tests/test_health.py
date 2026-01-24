@@ -4,6 +4,10 @@ from src.app import app
 client = TestClient(app)
 
 def test_health():
-    response = client.get("/health")
-    assert response.status_code == 200
-    assert response.json()["status"] == "ok"
+    r = client.get("/health")
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body["status"] == "ok"
+    assert body["preprocessor_loaded"] is True
+    assert body["model_loaded"] is True

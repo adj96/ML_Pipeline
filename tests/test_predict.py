@@ -1,28 +1,26 @@
-# tests/test_predict.py
-
 from fastapi.testclient import TestClient
-from src.app import app
+import src.app as appmod
 
-client = TestClient(app)
+client = TestClient(appmod.app)
 
+def test_model_artifacts_exist():
+    assert appmod.PREPROCESSOR_PATH.exists()
+    assert appmod.MODEL_PATH.exists()
 
 def test_predict():
     payload = {
-        "machine_age_days": 10,
-        "temperature_c": 25,
-        "pressure_kpa": 101,
-        "vibration_mm_s": 1.2,
-        "humidity_pct": 60,
-        "operator_experience_yrs": 3,
-        "shift": 2,
-        "material_grade": 1,
-        "line_speed_m_min": 120,
-        "inspection_interval_hrs": 8
+        "event_ts": 1700000000,
+        "shortage_flag": 0,
+        "replenishment_eta_min": 0,
+        "machine_state": "RUN",
+        "down_minutes_last_60": 0,
+        "queue_time_min": 5,
+        "baseline_queue_min": 5,
     }
 
     r = client.post("/predict", json=payload)
 
-    assert r.status_code == 200
+    assert r.status_code == 200, r.text
     body = r.json()
 
     assert "prediction" in body
