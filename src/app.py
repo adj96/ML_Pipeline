@@ -1,42 +1,50 @@
-from contextlib import asynccontextmanager
-from pathlib import Path
-
+# src/app.py
+import os
 import joblib
 from fastapi import FastAPI
 
-# Required for your current test_health.py
-MODEL_PATH = Path("models/model.joblib")
-PREPROCESSOR_PATH = Path("models/preprocessor.joblib")
+from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
 
+app = FastAPI()
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # default state
-    app.state.model_loaded = False
-    app.state.preprocessor_loaded = False
-    app.state.model = None
-    app.state.preprocessor = None
+MODEL = None
+MODEL_LOADED = False
+PREPROCESSOR_LOADED = False
 
-    # load preprocessor (must exist in Jenkins workspace)
-    if PREPROCESSOR_PATH.exists():
-        app.state.preprocessor = joblib.load(PREPROCESSOR_PATH)
-        app.state.preprocessor_loaded = True
+MODEL_PATH = os.getenv("MODEL_PATH", "src/model.joblib")  # keep your existing path if different
 
-    # load model (must exist in Jenkins workspace)
-    if MODEL_PATH.exists():
-        app.state.model = joblib.load(MODEL_PATH)
-        app.state.model_loaded = True
+def _infer_preprocessor_loaded(obj) -> bool:
+    # Case A: full Pipeline (preprocess + model)
+    if isinstance(obj, Pipeline):
+        # if any step is ColumnTransformer or has transform()
+        for _, step in obj.steps:
+            if isinstance(step, ColumnTransformer) or hasattr(step, "transform"):
+                return True
+        return False
 
-    yield
+    # Case B: standalone preprocessor mistakenly saved as "model.joblib"
+    if isinstance(obj, ColumnTransformer) or hasattr(obj, "transform"):
+        return True
 
+    return False
 
-app = FastAPI(lifespan=lifespan)
-
+@app.on_event("startup")
+def load_artifact():
+    global MODEL, MODEL_LOADED, PREPROCESSOR_LOADED
+    try:
+        MODEL = joblib.load(MODEL_PATH)
+        MODEL_LOADED = True
+        PREPROCESSOR_LOADED = _infer_preprocessor_loaded(MODEL)
+    except Exception:
+        MODEL = None
+        MODEL_LOADED = False
+        PREPROCESSOR_LOADED = False
 
 @app.get("/health")
 def health():
     return {
         "status": "ok",
-        "preprocessor_loaded": bool(app.state.preprocessor_loaded),
-        "model_loaded": bool(app.state.model_loaded),
+        "model_loaded": MODEL_LOADED,
+        "preprocessor_loaded": PREPROCESSOR_LOADED,
     }
