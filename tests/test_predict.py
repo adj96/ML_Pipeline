@@ -19,9 +19,8 @@ def test_predict():
     }
 
     r = client.post("/predict", json=payload)
-
     assert r.status_code == 200, r.text
-    body = r.json()
 
+    body = r.json()
     assert "prediction" in body
     assert isinstance(body["prediction"], (int, float))
