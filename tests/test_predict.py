@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from src.app import app
 
 class PredictIn(BaseModel):
     event_ts: int
