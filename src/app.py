@@ -1,72 +1,50 @@
 # src/app.py
 import os
 import joblib
-import pandas as pd
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from fastapi import FastAPI
 
-APP_DIR = os.path.dirname(__file__)
-MODEL_PATH = os.path.join(APP_DIR, "model.joblib")
+from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
 
 app = FastAPI()
 
-_pipeline = None
-model_loaded = False
-preprocessor_loaded = False  # mirror model_loaded (single artifact contains everything)
+MODEL = None
+MODEL_LOADED = False
+PREPROCESSOR_LOADED = False
 
+MODEL_PATH = os.getenv("MODEL_PATH", "src/model.joblib")  # keep your existing path if different
 
-class PredictRequest(BaseModel):
-    event_ts: int
-    shortage_flag: int
-    replenishment_eta_min: float
-    machine_state: str
-    down_minutes_last_60: float
-    queue_time_min: float
-    baseline_queue_min: float
+def _infer_preprocessor_loaded(obj) -> bool:
+    # Case A: full Pipeline (preprocess + model)
+    if isinstance(obj, Pipeline):
+        # if any step is ColumnTransformer or has transform()
+        for _, step in obj.steps:
+            if isinstance(step, ColumnTransformer) or hasattr(step, "transform"):
+                return True
+        return False
 
+    # Case B: standalone preprocessor mistakenly saved as "model.joblib"
+    if isinstance(obj, ColumnTransformer) or hasattr(obj, "transform"):
+        return True
 
-def _safe_load_model():
-    global _pipeline, model_loaded, preprocessor_loaded
-    try:
-        if not os.path.exists(MODEL_PATH):
-            _pipeline = None
-            model_loaded = False
-            preprocessor_loaded = False
-            return
-
-        _pipeline = joblib.load(MODEL_PATH)
-        model_loaded = True
-        preprocessor_loaded = True
-    except Exception:
-        _pipeline = None
-        model_loaded = False
-        preprocessor_loaded = False
-
-
-# Load at import-time so pytest/TestClient does not depend on startup hooks
-_safe_load_model()
-
+    return False
 
 @app.on_event("startup")
-def _startup_load():
-    # Also load on real app startup (harmless if already loaded)
-    _safe_load_model()
-
+def load_artifact():
+    global MODEL, MODEL_LOADED, PREPROCESSOR_LOADED
+    try:
+        MODEL = joblib.load(MODEL_PATH)
+        MODEL_LOADED = True
+        PREPROCESSOR_LOADED = _infer_preprocessor_loaded(MODEL)
+    except Exception:
+        MODEL = None
+        MODEL_LOADED = False
+        PREPROCESSOR_LOADED = False
 
 @app.get("/health")
 def health():
     return {
         "status": "ok",
-        "model_loaded": model_loaded,
-        "preprocessor_loaded": preprocessor_loaded,
+        "model_loaded": MODEL_LOADED,
+        "preprocessor_loaded": PREPROCESSOR_LOADED,
     }
-
-
-@app.post("/predict")
-def predict(req: PredictRequest):
-    if _pipeline is None:
-        raise HTTPException(status_code=503, detail="Model not loaded")
-
-    df = pd.DataFrame([req.model_dump()])
-    yhat = _pipeline.predict(df)
-    return {"prediction": float(yhat[0])}
