@@ -4,6 +4,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && pip install --no-cache-dir pytest
 
+# Make /app visible to Python so /app/src is importable as "src"
+ENV PYTHONPATH=/app
+
 COPY src ./src
 COPY tests ./tests
 
