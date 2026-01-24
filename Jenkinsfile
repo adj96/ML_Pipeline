@@ -51,7 +51,7 @@ pipeline {
       }
     }
 
-  stage('QA (Unit Tests)') {
+    stage('QA (Unit Tests)') {
   steps {
     bat '''
       @echo on
