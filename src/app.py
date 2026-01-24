@@ -1,50 +1,55 @@
-# src/app.py
-import os
+from contextlib import asynccontextmanager
+from pathlib import Path
+
 import joblib
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 
-from sklearn.pipeline import Pipeline
-from sklearn.compose import ColumnTransformer
+# Adjust these defaults to your repo structure
+DEFAULT_MODEL_PATH = Path("models/model.joblib")
+DEFAULT_PREPROCESSOR_PATH = Path("models/preprocessor.joblib")
 
-app = FastAPI()
 
-MODEL = None
-MODEL_LOADED = False
-PREPROCESSOR_LOADED = False
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # --- startup: load artifacts ---
+    model_path = DEFAULT_MODEL_PATH
+    pre_path = DEFAULT_PREPROCESSOR_PATH
 
-MODEL_PATH = os.getenv("MODEL_PATH", "src/model.joblib")  # keep your existing path if different
+    # Initialize flags
+    app.state.model_loaded = False
+    app.state.preprocessor_loaded = False
+    app.state.model = None
+    app.state.preprocessor = None
 
-def _infer_preprocessor_loaded(obj) -> bool:
-    # Case A: full Pipeline (preprocess + model)
-    if isinstance(obj, Pipeline):
-        # if any step is ColumnTransformer or has transform()
-        for _, step in obj.steps:
-            if isinstance(step, ColumnTransformer) or hasattr(step, "transform"):
-                return True
-        return False
+    # Load preprocessor
+    if not pre_path.exists():
+        raise FileNotFoundError(f"Preprocessor not found: {pre_path.resolve()}")
+    app.state.preprocessor = joblib.load(pre_path)
+    app.state.preprocessor_loaded = True
 
-    # Case B: standalone preprocessor mistakenly saved as "model.joblib"
-    if isinstance(obj, ColumnTransformer) or hasattr(obj, "transform"):
-        return True
+    # Load model
+    if not model_path.exists():
+        raise FileNotFoundError(f"Model not found: {model_path.resolve()}")
+    app.state.model = joblib.load(model_path)
+    app.state.model_loaded = True
 
-    return False
+    yield
 
-@app.on_event("startup")
-def load_artifact():
-    global MODEL, MODEL_LOADED, PREPROCESSOR_LOADED
-    try:
-        MODEL = joblib.load(MODEL_PATH)
-        MODEL_LOADED = True
-        PREPROCESSOR_LOADED = _infer_preprocessor_loaded(MODEL)
-    except Exception:
-        MODEL = None
-        MODEL_LOADED = False
-        PREPROCESSOR_LOADED = False
+    # --- shutdown (optional) ---
+    # cleanup if needed
+
+
+app = FastAPI(lifespan=lifespan)
+
 
 @app.get("/health")
 def health():
-    return {
-        "status": "ok",
-        "model_loaded": MODEL_LOADED,
-        "preprocessor_loaded": PREPROCESSOR_LOADED,
-    }
+    return JSONResponse(
+        status_code=200,
+        content={
+            "status": "ok",
+            "preprocessor_loaded": bool(getattr(app.state, "preprocessor_loaded", False)),
+            "model_loaded": bool(getattr(app.state, "model_loaded", False)),
+        },
+    )
