@@ -1,10 +1,11 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: mldevops
-  namespace: mldevopskatir
+  name: arvmldevopspipeline
+  namespace: arvmldevopspipeline
 spec:
   replicas: 2
+  revisionHistoryLimit: 3
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -12,27 +13,39 @@ spec:
       maxSurge: 1
   selector:
     matchLabels:
-      app: mldevops
+      app: arvmldevopspipeline
   template:
     metadata:
       labels:
-        app: mldevops
+        app: arvmldevopspipeline
     spec:
       containers:
-        - name: mldevops
-          image: katiravan/mldevopskatir:2026118
-          imagePullPolicy: Always
+        - name: arvmldevopspipeline
+          image: arvmldevopspipeline:24126
+          imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 8000
+            - name: http
+              containerPort: 8000
           readinessProbe:
             httpGet:
               path: /health
-              port: 8000
+              port: http
             initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
           livenessProbe:
             httpGet:
               path: /health
-              port: 8000
+              port: http
             initialDelaySeconds: 15
             periodSeconds: 20
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"

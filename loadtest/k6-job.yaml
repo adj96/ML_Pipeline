@@ -2,7 +2,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: k6
-  namespace: mldevopskatir
+  namespace: arvmldevopspipeline
 spec:
   backoffLimit: 0
   template:
@@ -14,7 +14,7 @@ spec:
           args: ["run", "/scripts/k6.js"]
           env:
             - name: BASE_URL
-              value: "http://mldevops:8000"
+              value: "http://arvmldevopspipeline-svc.arvmldevopspipeline.svc.cluster.local:8000"
           volumeMounts:
             - name: k6-scripts
               mountPath: /scripts

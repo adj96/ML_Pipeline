@@ -1,12 +1,13 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: mldevops
-  namespace: mldevopskatir
+  name: arvmldevopspipeline-svc
+  namespace: arvmldevopspipeline
 spec:
-  selector:
-    app: mldevops
-  ports:
-    - port: 8000
-      targetPort: 8000
   type: ClusterIP
+  selector:
+    app: arvmldevopspipeline
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

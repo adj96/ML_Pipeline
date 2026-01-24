@@ -13,28 +13,28 @@ export const options = {
   },
 };
 
-const BASE_URL = (__ENV.BASE_URL || "http://mldevops:8000").replace(/\/+$/, "");
+const BASE_URL = (__ENV.BASE_URL || "http://arvmldevopspipeline-svc.arvmldevopspipeline.svc.cluster.local:8000")
+  .replace(/\/+$/, "");
+
+function rndInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
 
 export default function () {
-  // 10 features (replace numbers with realistic values/ranges)
   const payload = JSON.stringify({
-    machine_age_days: 10,
-    temperature_c: 25,
-    pressure_kpa: 101,
-    vibration_mm_s: 1.2,
-    humidity_pct: 60,
-    operator_experience_yrs: 3,
-    shift: 2,
-    material_grade: 1,
-    line_speed_m_min: 120,
-    inspection_interval_hrs: 8
+    event_ts: Date.now(),                 // integer-like
+    shortage_flag: rndInt(0, 1),          // 0/1
+    replenishment_eta_min: rndInt(0, 240),
+    machine_state: rndInt(0, 3),
+    down_minutes_last_60: rndInt(0, 60),
+    queue_time_min: rndInt(0, 120),
+    baseline_queue_min: rndInt(0, 120),
   });
 
-  const params = {
+  const res = http.post(`${BASE_URL}/predict`, payload, {
     headers: { "Content-Type": "application/json" },
-  };
-
-  const res = http.post(`${BASE_URL}/predict`, payload, params);
+    timeout: "5s",
+  });
 
   check(res, {
     "status is 200": (r) => r.status === 200,
