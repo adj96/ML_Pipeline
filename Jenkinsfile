@@ -51,7 +51,7 @@ pipeline {
       }
     }
 
-stage('QA (Unit Tests)') {
+  stage('QA (Unit Tests)') {
   steps {
     bat '''
       @echo on
@@ -59,9 +59,11 @@ stage('QA (Unit Tests)') {
 
       docker build -t %IMAGE_REPO%:test-%SHORTSHA% -f Dockerfile.test .
 
-      docker run --rm ^
-        -v "%WORKSPACE%\\reports:/reports" ^
-        %IMAGE_REPO%:test-%SHORTSHA%
+      docker create --name testrun %IMAGE_REPO%:test-%SHORTSHA%
+      docker start -a testrun
+
+      docker cp testrun:/app/reports/test-results.xml "%WORKSPACE%\\reports\\test-results.xml"
+      docker rm -f testrun
     '''
   }
   post {
