@@ -1,11 +1,8 @@
-# test_predict.py
-# Purpose: Jenkins smoke-test for model.joblib (single artifact pipeline = preprocessing + model)
-
-import sys
 import joblib
 import pandas as pd
+from pathlib import Path
 
-MODEL_PATH = "src/model.joblib"  # adjust if your model is elsewhere
+MODEL_PATH = Path("src") / "model.joblib"   # change to "mode.joblib" if that is your real filename
 
 REQUIRED_COLS = [
     "event_ts",
@@ -18,14 +15,13 @@ REQUIRED_COLS = [
 ]
 
 DROP_IF_PRESENT = [
-    "eta_minutes_remaining",  # target
+    "eta_minutes_remaining",
     "delay_flag",
     "delay_label_dev",
     "work_order_id",
 ]
 
 def make_min_sample() -> pd.DataFrame:
-    # Minimal valid row that matches training schema
     return pd.DataFrame([{
         "event_ts": "2026-01-24 10:00:00",
         "baseline_queue_min": 12.0,
@@ -36,29 +32,23 @@ def make_min_sample() -> pd.DataFrame:
         "down_minutes_last_60": 0.0,
     }])
 
-def main():
+def test_predict_smoke():
+    assert MODEL_PATH.exists(), f"Missing model file at {MODEL_PATH}"
+
     m = joblib.load(MODEL_PATH)
 
-    # Build X for prediction (DataFrame with required raw columns)
     X = make_min_sample()
 
-    # Ensure required columns exist
-    missing = [c for c in REQUIRED_COLS if c not in X.columns]
-    if missing:
-        raise SystemExit(f"ERROR: Missing required columns for predict: {missing}")
+    # make event_ts robust if your pipeline expects datetime
+    X["event_ts"] = pd.to_datetime(X["event_ts"], errors="coerce")
 
-    # Drop targets/ids if accidentally included
+    # drop accidental cols
     X = X.drop(columns=[c for c in DROP_IF_PRESENT if c in X.columns], errors="ignore")
 
-    # Keep only the columns the preprocessor expects (avoid extra cols breaking older setups)
+    # keep schema order
     X = X[REQUIRED_COLS].copy()
 
-    # Predict
     pred = m.predict(X)
 
-    print("OK: predict() ran")
-    print("Input columns:", list(X.columns))
-    print("Prediction:", pred.tolist())
-
-if __name__ == "__main__":
-    main()
+    assert pred is not None
+    assert len(pred) == 1
