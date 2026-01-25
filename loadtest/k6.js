@@ -20,70 +20,48 @@ function url(path) {
   return `${base}${p}`;
 }
 
-// Default minimal payload. Override in Jenkins by setting PAYLOAD_JSON
-const DEFAULT_PAYLOAD = {
-  event_ts: "2026-01-24 10:00:00",
-  baseline_queue_min: 12.0,
-  shortage_flag: 0,
-  replenishment_eta_min: 0.0,
-  machine_state: "RUN",
-  queue_time_min: 5.0,
-  down_minutes_last_60: 0.0,
-};
-
-function getPayload() {
-  if (!__ENV.PAYLOAD_JSON) return DEFAULT_PAYLOAD;
-  try {
-    const p = JSON.parse(__ENV.PAYLOAD_JSON);
-    return p && typeof p === "object" ? p : DEFAULT_PAYLOAD;
-  } catch (e) {
-    return DEFAULT_PAYLOAD;
-  }
-}
-
 export default function () {
-  // 80–90% predict traffic, 10–20% health traffic
-  // Keep it deterministic and simple: 1 in 5 iterations hits /health (~20%), others hit /predict (~80%)
-  const doHealth = (__ITER % 5) === 0;
+  // Health check (must be 200)
+  const h = http.get(url("/health"));
+  check(h, {
+    "health status is 200": (r) => r.status === 200,
+    "health has ok payload": (r) => {
+      try {
+        const j = r.json();
+        return j && (j.status === "ok" || j.status === "OK");
+      } catch (e) {
+        return false;
+      }
+    },
+  });
 
-  if (doHealth) {
-    const h = http.get(url("/health"));
-    check(h, {
-      "health status is 200": (r) => r.status === 200,
-      "health has ok payload": (r) => {
-        try {
-          const j = r.json();
-          return j && (j.status === "ok" || j.status === "OK");
-        } catch (e) {
-          return false;
-        }
-      },
-    });
-  } else {
-    const payload = getPayload();
-    const p = http.post(url("/predict"), JSON.stringify(payload), {
-      headers: { "Content-Type": "application/json" },
-    });
+  // Optional: basic predict smoke (only runs if you provide PAYLOAD_JSON)
+  // In Jenkins: set env PAYLOAD_JSON={"feature1":1.0,"feature2":2.0,...}
+  if (__ENV.PAYLOAD_JSON) {
+    let payload;
+    try {
+      payload = JSON.parse(__ENV.PAYLOAD_JSON);
+    } catch (e) {
+      payload = null;
+    }
 
-    check(p, {
-      "predict status is 200": (r) => r.status === 200,
-      "predict returns prediction": (r) => {
-        try {
-          const j = r.json();
-          // Accept both common formats:
-          // 1) {"prediction": 12.3}
-          // 2) {"predictions":[12.3]} or {"predictions":[...]}
-          if (j && typeof j.prediction === "number" && isFinite(j.prediction)) return true;
-          if (j && Array.isArray(j.predictions) && j.predictions.length > 0) {
-            const v = j.predictions[0];
-            return typeof v === "number" && isFinite(v);
+    if (payload) {
+      const p = http.post(url("/predict"), JSON.stringify(payload), {
+        headers: { "Content-Type": "application/json" },
+      });
+
+      check(p, {
+        "predict status is 200": (r) => r.status === 200,
+        "predict returns prediction": (r) => {
+          try {
+            const j = r.json();
+            return j && typeof j.prediction === "number" && isFinite(j.prediction);
+          } catch (e) {
+            return false;
           }
-          return false;
-        } catch (e) {
-          return false;
-        }
-      },
-    });
+        },
+      });
+    }
   }
 
   sleep(1);
