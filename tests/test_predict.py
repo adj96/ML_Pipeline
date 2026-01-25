@@ -2,10 +2,11 @@
 # Purpose: Jenkins smoke-test for model.joblib (single artifact pipeline = preprocessing + model)
 
 import sys
+import os
 import joblib
 import pandas as pd
 
-MODEL_PATH = "models/model.joblib"  # adjust if your model is elsewhere
+MODEL_PATH = os.getenv("MODEL_PATH", "/app/models/model.joblib")
 
 REQUIRED_COLS = [
     "event_ts",
