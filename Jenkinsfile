@@ -163,35 +163,36 @@ stage('Smoke Test (/health + /predict)') {
       setlocal EnableExtensions EnableDelayedExpansion
       set KUBECONFIG=%KUBECONFIG_FILE%
 
-      set POD=curl-%RANDOM%
-      kubectl -n arvmldevopspipeline delete pod !POD! --ignore-not-found >nul 2>nul
+      REM ========= (0) Clean any old curl pods (best-effort) =========
+      for /f "delims=" %%P in ('kubectl -n arvmldevopspipeline get pods -o name ^| findstr /i "pod/curl-"') do kubectl -n arvmldevopspipeline delete %%P --ignore-not-found >nul 2>nul
 
       REM ========= (1) /health must return ok + model_loaded true =========
+      set POD=curl-%RANDOM%
       kubectl -n arvmldevopspipeline run !POD! --rm -i --restart=Never --image=curlimages/curl -- ^
-      sh -lc "set -e; \
-        BODY=$(curl -sS http://arvmldevopspipeline-svc:8000/health); \
-        echo \"$BODY\"; \
-        echo \"$BODY\" | grep -q '\"status\":\"ok\"'; \
-        echo \"$BODY\" | grep -q '\"model_loaded\":true'"
+        sh -lc "set -e; \
+          echo '[SMOKE] GET /health'; \
+          BODY=$(curl -sS http://arvmldevopspipeline-svc:8000/health); \
+          echo \"$BODY\"; \
+          echo \"$BODY\" | grep -q '\"status\":\"ok\"'; \
+          echo \"$BODY\" | grep -q '\"model_loaded\":true'"
 
-        REM ========= (2) /predict must return HTTP 200 + prediction field =========
-        set POD=curl-%RANDOM%
-        kubectl -n arvmldevopspipeline run !POD! --rm -i --restart=Never --image=curlimages/curl -- ^
-          sh -lc "set -e; \
-            echo '[SMOKE] POST /predict'; \
-            cat > /tmp/payload.json <<'EOF' \
-        {\"event_ts\":\"2026-01-24 10:00:00\",\"baseline_queue_min\":12.0,\"shortage_flag\":0,\"replenishment_eta_min\":0.0,\"machine_state\":\"RUN\",\"queue_time_min\":10.0,\"down_minutes_last_60\":0.0} \
-        EOF \
-            RESP=$(curl -g -sS -i http://arvmldevopspipeline-svc:8000/predict -H 'Content-Type: application/json' --data-binary @/tmp/payload.json); \
-            echo \"$RESP\"; \
-            echo \"$RESP\" | head -n 1 | grep -Eq 'HTTP/.* 200'; \
-            echo \"$RESP\" | grep -Eq '(prediction|predictions)'"
+      REM ========= (2) /predict must return HTTP 200 + prediction field =========
+      set POD=curl-%RANDOM%
+      kubectl -n arvmldevopspipeline run !POD! --rm -i --restart=Never --image=curlimages/curl -- ^
+        sh -lc "set -e; \
+          echo '[SMOKE] POST /predict'; \
+          printf '%s' '{\"event_ts\":\"2026-01-24 10:00:00\",\"baseline_queue_min\":12.0,\"shortage_flag\":0,\"replenishment_eta_min\":0.0,\"machine_state\":\"RUN\",\"queue_time_min\":10.0,\"down_minutes_last_60\":0.0}' > /tmp/payload.json; \
+          RESP=$(curl -sS -i http://arvmldevopspipeline-svc:8000/predict -H 'Content-Type: application/json' --data-binary @/tmp/payload.json); \
+          echo \"$RESP\"; \
+          echo \"$RESP\" | head -n 1 | grep -Eq 'HTTP/.* 200'; \
+          echo \"$RESP\" | grep -Eq '\"prediction\"'"
 
       endlocal
       '''
     }
   }
 }
+
 
     stage('Load Test (k6)') {
       steps {
