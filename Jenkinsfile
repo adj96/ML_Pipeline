@@ -182,6 +182,7 @@ stage('Smoke Test (/health + /predict)') {
     }
   }
 }
+
  
 
     stage('Load Test (k6)') {
