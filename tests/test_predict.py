@@ -5,7 +5,7 @@ import sys
 import joblib
 import pandas as pd
 
-MODEL_PATH = "src/model.joblib"  # adjust if your model is elsewhere
+MODEL_PATH = "models/model.joblib"  # adjust if your model is elsewhere
 
 REQUIRED_COLS = [
     "event_ts",
