@@ -12,7 +12,7 @@ MODEL = None
 MODEL_LOADED = False
 PREPROCESSOR_LOADED = False
 
-MODEL_PATH = os.getenv("MODEL_PATH", "/app/src/model.joblib")
+MODEL_PATH = os.getenv("MODEL_PATH", "/models/model.joblib")
 
 def _infer_preprocessor_loaded(obj) -> bool:
     # Case A: full Pipeline (preprocess + model)
