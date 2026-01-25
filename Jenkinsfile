@@ -160,29 +160,29 @@ pipeline {
   steps {
     withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
       bat '''
-        @echo on
-        setlocal EnableExtensions EnableDelayedExpansion
+      setlocal EnableExtensions EnableDelayedExpansion
+      set KUBECONFIG=%KUBECONFIG_FILE%
 
-        set KUBECONFIG=%KUBECONFIG_FILE%
-        set POD=curl-%BUILD_NUMBER%
+      set POD=curl-%RANDOM%
+      kubectl -n arvmldevopspipeline delete pod !POD! --ignore-not-found >nul 2>nul
 
-        kubectl -n %NAMESPACE% delete pod %POD% --ignore-not-found
-
-        kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- ^
-          sh -lc "set -e; ^
-          echo --- /health ---; ^
-          curl -sS -f http://%SERVICE%:8000/health ^| grep -q '\"status\"'; ^
-          echo --- /predict ---; ^
-          RESP=$(curl -sS -w '\\n%{http_code}' -H 'Content-Type: application/json' -X POST http://%SERVICE%:8000/predict -d '{\"event_ts\":\"2026-01-24 10:00:00\",\"baseline_queue_min\":12.0,\"shortage_flag\":0,\"replenishment_eta_min\":0.0,\"machine_state\":\"RUN\",\"queue_time_min\":5.0,\"down_minutes_last_60\":0.0}'); ^
-          CODE=$(echo \"$RESP\" | tail -n 1); ^
-          BODY=$(echo \"$RESP\" | head -n -1); ^
-          echo \"$BODY\"; ^
-          [ \"$CODE\" = \"200\" ]; ^
-          echo \"$BODY\" | grep -Eq '[-]?[0-9]+(\\.[0-9]+)?' "
+      kubectl -n arvmldevopspipeline run !POD! --rm -i --restart=Never --image=curlimages/curl -- sh -lc "set -e; \
+        echo '--- /health ---'; \
+        curl -sS -f http://arvmldevopspipeline-svc:8000/health | grep -q '\"status\"'; \
+        echo '--- /predict ---'; \
+        CODE=$(curl -sS -o /tmp/predict.json -w '%%{http_code}' \
+          -X POST http://arvmldevopspipeline-svc:8000/predict \
+          -H 'Content-Type: application/json' \
+          -d '{\"event_ts\":\"2026-01-24 10:00:00\",\"baseline_queue_min\":12.0,\"shortage_flag\":0,\"replenishment_eta_min\":0.0,\"machine_state\":\"RUN\",\"queue_time_min\":5.0,\"down_minutes_last_60\":0.0}'); \
+        cat /tmp/predict.json; echo; \
+        [ \"$CODE\" = \"200\" ]; \
+        grep -Eq '[-]?[0-9]+(\\.[0-9]+)?' /tmp/predict.json \
+      "
       '''
     }
   }
 }
+
 
     
 
