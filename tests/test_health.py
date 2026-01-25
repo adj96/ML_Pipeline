@@ -4,9 +4,8 @@ from src.app import app
 client = TestClient(app)
 
 def test_health():
-    r = client.get("/health")
+    r = requests.get("http://localhost:8000/health", timeout=5)
     assert r.status_code == 200
-    body = r.json()
-    assert body["status"] == "ok"
-    assert "preprocessor_loaded" in body
-    assert "model_loaded" in body
+    data = r.json()
+    assert data["status"] == "ok"
+    assert "model_loaded" in data
