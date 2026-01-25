@@ -160,31 +160,33 @@ stage('Smoke Test (/health + /predict)') {
   steps {
     withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
       bat '''
-        @echo on
-        setlocal EnableExtensions EnableDelayedExpansion
-        set KUBECONFIG=%KUBECONFIG_FILE%
+      setlocal EnableExtensions EnableDelayedExpansion
+      set KUBECONFIG=%KUBECONFIG_FILE%
 
-        set POD=curl-%BUILD_NUMBER%
-        kubectl -n %NAMESPACE% delete pod %POD% --ignore-not-found >nul 2>nul
+      set POD=curl-%RANDOM%
+      kubectl -n arvmldevopspipeline delete pod !POD! --ignore-not-found >nul 2>nul
 
-        REM ========= (1) /health must return ok + model_loaded true =========
-        kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- ^
-          sh -lc "set -e; \
+      REM ========= (1) /health must return ok + model_loaded true =========
+      kubectl -n arvmldevopspipeline run !POD! --rm -i --restart=Never --image=curlimages/curl -- ^
+        sh -lc "set -e; \
           echo '[SMOKE] GET /health'; \
-          BODY=$(curl -sS http://%SERVICE%:8000/health); echo $BODY; \
-          echo $BODY | grep -q '\\\"status\\\":\\\"ok\\\"'; \
-          echo $BODY | grep -q '\\\"model_loaded\\\":true'"
+          BODY=$(curl -sS http://arvmldevopspipeline-svc:8000/health); \
+          echo \"$BODY\"; \
+          echo \"$BODY\" | grep -q '\\"status\\":\\"ok\\"'; \
+          echo \"$BODY\" | grep -q '\\"model_loaded\\":true'"
 
-        REM ========= (2) /predict must return HTTP 200 + a prediction field =========
-        kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- ^
-          sh -lc "set -e; \
+      REM ========= (2) /predict must return HTTP 200 + prediction field =========
+      set POD=curl-%RANDOM%
+      kubectl -n arvmldevopspipeline run !POD! --rm -i --restart=Never --image=curlimages/curl -- ^
+        sh -lc "set -e; \
           echo '[SMOKE] POST /predict'; \
-          PAYLOAD='{\\\"event_ts\\\":\\\"2026-01-24 10:00:00\\\",\\\"baseline_queue_min\\\":12.0,\\\"shortage_flag\\\":0,\\\"replenishment_eta_min\\\":0.0,\\\"machine_state\\\":\\\"RUN\\\",\\\"queue_time_min\\\":10.0,\\\"down_minutes_last_60\\\":0.0}'; \
-          RESP=$(curl -sS -w '\\nHTTP=%{http_code}\\n' -X POST http://%SERVICE%:8000/predict -H 'Content-Type: application/json' -d \"$PAYLOAD\"); \
-          echo \"$RESP\" | grep -q 'HTTP=200'; \
+          PAYLOAD='{\\"event_ts\\":\\"2026-01-24 10:00:00\\",\\"baseline_queue_min\\":12.0,\\"shortage_flag\\":0,\\"replenishment_eta_min\\":0.0,\\"machine_state\\":\\"RUN\\",\\"queue_time_min\\":10.0,\\"down_minutes_last_60\\":0.0}'; \
+          RESP=$(curl -sS -i http://arvmldevopspipeline-svc:8000/predict -H 'Content-Type: application/json' -d \"$PAYLOAD\"); \
+          echo \"$RESP\"; \
+          echo \"$RESP\" | head -n 1 | grep -Eq 'HTTP/.* 200'; \
           echo \"$RESP\" | grep -Eq '(prediction|predictions)'"
 
-        endlocal
+      endlocal
       '''
     }
   }
