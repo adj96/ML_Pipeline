@@ -11,7 +11,7 @@ import uvicorn.__main__ as uvicorn_main
 MODEL = None
 MODEL_LOADED = False
 
-MODEL_PATH = os.getenv("MODEL_PATH", "/app/src/model.joblib")  # container path
+MODEL_PATH = os.getenv("MODEL_PATH", "/src/model.joblib")  # container path
 
 REQUIRED_COLS = [
     "event_ts",
