@@ -161,38 +161,32 @@ stage('Smoke Test (/health + /predict)') {
     withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
       bat '''
       setlocal EnableExtensions EnableDelayedExpansion
-      set KUBECONFIG=%KUBECONFIG_FILE%
+      set "KUBECONFIG=%KUBECONFIG_FILE%"
 
-      set POD=curl-%RANDOM%
+      set "NS=arvmldevopspipeline"
+      set "SVC=arvmldevopspipeline-svc"
+      set "PORT=8000"
+      set "POD=smoke-%RANDOM%"
 
-      kubectl -n arvmldevopspipeline run !POD! --rm -i --restart=Never --image=curlimages/curl -- sh -lc "
-        set -eu
-
-        echo '--- /health ---'
-        curl -sS -f http://arvmldevopspipeline-svc:8000/health > /tmp/health.json
-        cat /tmp/health.json
-        echo
-        grep -q '\"status\"' /tmp/health.json
-
-        echo '--- /predict ---'
-        BODY='{\"event_ts\":\"2026-01-24 10:00:00\",\"baseline_queue_min\":12.0,\"shortage_flag\":0,\"replenishment_eta_min\":0.0,\"machine_state\":\"RUN\",\"queue_time_min\":5.0,\"down_minutes_last_60\":0.0}'
-
-        CODE=$(curl -sS -o /tmp/predict.json -w '%{http_code}' \
-          -X POST http://arvmldevopspipeline-svc:8000/predict \
-          -H 'Content-Type: application/json' \
-          -d \"$BODY\")
-
-        echo HTTP:$CODE
-        cat /tmp/predict.json
-        echo
-
-        test \"$CODE\" = \"200\"
-        grep -Eq '[-]?[0-9]+(\\.[0-9]+)?' /tmp/predict.json
+      kubectl -n %NS% run !POD! --rm -i --restart=Never --image=curlimages/curl -- sh -lc "set -eu; \
+        echo '--- /health ---'; \
+        curl -sS -f http://%SVC%:%PORT%/health > /tmp/health.json; \
+        cat /tmp/health.json; echo; \
+        grep -q '\\"status\\"' /tmp/health.json; \
+        echo '--- /predict ---'; \
+        BODY='{\\\"event_ts\\\":\\\"2026-01-24 10:00:00\\\",\\\"baseline_queue_min\\\":12.0,\\\"shortage_flag\\\":0,\\\"replenishment_eta_min\\\":0.0,\\\"machine_state\\\":\\\"RUN\\\",\\\"queue_time_min\\\":5.0,\\\"down_minutes_last_60\\\":0.0}'; \
+        CODE=$(curl -sS -o /tmp/predict.json -w '%{http_code}' -X POST http://%SVC%:%PORT%/predict -H 'Content-Type: application/json' -d \"$BODY\"); \
+        echo HTTP:$CODE; \
+        cat /tmp/predict.json; echo; \
+        test \"$CODE\" = \"200\"; \
+        grep -Eq '[-]?[0-9]+(\\\\.[0-9]+)?' /tmp/predict.json; \
+        echo 'SMOKE_OK' \
       "
       '''
     }
   }
 }
+
 
 
     stage('Load Test (k6)') {
