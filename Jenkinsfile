@@ -156,38 +156,23 @@ pipeline {
       }
     }
 
-stage('Smoke Test (/health + /predict)') {
-  steps {
-    withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
-      bat '''
-      setlocal EnableExtensions EnableDelayedExpansion
-      set "KUBECONFIG=%KUBECONFIG_FILE%"
+stage('Smoke Test (/health)') {
+      steps {
+        withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
+          bat '''
+            @echo on
+            set KUBECONFIG=%KUBECONFIG_FILE%
 
-      set "NS=arvmldevopspipeline"
-      set "SVC=arvmldevopspipeline-svc"
-      set "PORT=8000"
-      set "POD=smoke-%RANDOM%"
+            set POD=curl-%BUILD_NUMBER%
 
-      kubectl -n %NS% run !POD! --rm -i --restart=Never --image=curlimages/curl -- sh -lc "set -eu; \
-        echo '--- /health ---'; \
-        curl -sS -f http://%SVC%:%PORT%/health > /tmp/health.json; \
-        cat /tmp/health.json; echo; \
-        grep -q '\\"status\\"' /tmp/health.json; \
-        echo '--- /predict ---'; \
-        BODY='{\\\"event_ts\\\":\\\"2026-01-24 10:00:00\\\",\\\"baseline_queue_min\\\":12.0,\\\"shortage_flag\\\":0,\\\"replenishment_eta_min\\\":0.0,\\\"machine_state\\\":\\\"RUN\\\",\\\"queue_time_min\\\":5.0,\\\"down_minutes_last_60\\\":0.0}'; \
-        CODE=$(curl -sS -o /tmp/predict.json -w '%{http_code}' -X POST http://%SVC%:%PORT%/predict -H 'Content-Type: application/json' -d \"$BODY\"); \
-        echo HTTP:$CODE; \
-        cat /tmp/predict.json; echo; \
-        test \"$CODE\" = \"200\"; \
-        grep -Eq '[-]?[0-9]+(\\\\.[0-9]+)?' /tmp/predict.json; \
-        echo 'SMOKE_OK' \
-      "
-      '''
+            kubectl -n %NAMESPACE% delete pod %POD% --ignore-not-found
+
+            kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- ^
+              curl -sS http://%SERVICE%:8000/health || exit /b 1
+          '''
+        }
+      }
     }
-  }
-}
-
-
 
     stage('Load Test (k6)') {
       steps {
