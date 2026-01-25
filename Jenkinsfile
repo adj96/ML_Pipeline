@@ -168,12 +168,11 @@ stage('Smoke Test (/health + /predict)') {
 
       REM ========= (1) /health must return ok + model_loaded true =========
       kubectl -n arvmldevopspipeline run !POD! --rm -i --restart=Never --image=curlimages/curl -- ^
-        sh -lc "set -e; \
-          echo '[SMOKE] GET /health'; \
-          BODY=$(curl -sS http://arvmldevopspipeline-svc:8000/health); \
-          echo \"$BODY\"; \
-          echo \"$BODY\" | grep -q '\\"status\\":\\"ok\\"'; \
-          echo \"$BODY\" | grep -q '\\"model_loaded\\":true'"
+      sh -lc "set -e; \
+        BODY=$(curl -sS http://arvmldevopspipeline-svc:8000/health); \
+        echo \"$BODY\"; \
+        echo \"$BODY\" | grep -q '\"status\":\"ok\"'; \
+        echo \"$BODY\" | grep -q '\"model_loaded\":true'"
 
         REM ========= (2) /predict must return HTTP 200 + prediction field =========
         set POD=curl-%RANDOM%
