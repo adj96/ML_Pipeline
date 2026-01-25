@@ -156,7 +156,7 @@ pipeline {
       }
     }
 
-    stage('Smoke Test (/health + /predict)') {
+stage('Smoke Test (/health + /predict)') {
   steps {
     withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
       bat '''
@@ -164,27 +164,25 @@ pipeline {
       set KUBECONFIG=%KUBECONFIG_FILE%
 
       set POD=curl-%RANDOM%
-      kubectl -n arvmldevopspipeline delete pod !POD! --ignore-not-found >nul 2>nul
+      kubectl -n arvmldevopspipeline delete pod !POD! --ignore-not-found 1>nul 2>nul
 
       kubectl -n arvmldevopspipeline run !POD! --rm -i --restart=Never --image=curlimages/curl -- sh -lc "set -e; \
         echo '--- /health ---'; \
-        curl -sS -f http://arvmldevopspipeline-svc:8000/health | grep -q '\"status\"'; \
+        curl -sS -f http://arvmldevopspipeline-svc:8000/health | grep -q status; \
         echo '--- /predict ---'; \
-        CODE=$(curl -sS -o /tmp/predict.json -w '%%{http_code}' \
+        CODE=$(curl -sS -o /tmp/predict.json -w %%{http_code} \
           -X POST http://arvmldevopspipeline-svc:8000/predict \
           -H 'Content-Type: application/json' \
-          -d '{\"event_ts\":\"2026-01-24 10:00:00\",\"baseline_queue_min\":12.0,\"shortage_flag\":0,\"replenishment_eta_min\":0.0,\"machine_state\":\"RUN\",\"queue_time_min\":5.0,\"down_minutes_last_60\":0.0}'); \
+          -d '{^"event_ts^":^"2026-01-24 10:00:00^",^"baseline_queue_min^":12.0,^"shortage_flag^":0,^"replenishment_eta_min^":0.0,^"machine_state^":^"RUN^",^"queue_time_min^":5.0,^"down_minutes_last_60^":0.0}'); \
         cat /tmp/predict.json; echo; \
-        [ \"$CODE\" = \"200\" ]; \
+        [ \\"$CODE\\" = \\"200\\" ]; \
         grep -Eq '[-]?[0-9]+(\\.[0-9]+)?' /tmp/predict.json \
       "
       '''
     }
   }
 }
-
-
-    
+ 
 
     stage('Load Test (k6)') {
       steps {
