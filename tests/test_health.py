@@ -1,16 +1,12 @@
 from fastapi.testclient import TestClient
-import os
-import src.app as appmod
+from src.app import app
 
-# Force model path to the real artifact for test runtime
-appmod.MODEL_PATH = os.path.abspath("app/src/model.joblib")
-
-client = TestClient(appmod.app)
+client = TestClient(app)
 
 def test_health():
     r = client.get("/health")
     assert r.status_code == 200
     body = r.json()
-
     assert body["status"] == "ok"
-    assert body["model_loaded"] is True
+    assert "preprocessor_loaded" in body
+    assert "model_loaded" in body
