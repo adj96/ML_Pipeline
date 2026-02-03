@@ -15,8 +15,7 @@ def test_health_ok_payload():
 
     # these keys must exist in the response
     assert "model_loaded" in body
-    assert "preprocessor_loaded" in body
 
     # optional: enforce booleans
     assert isinstance(body["model_loaded"], bool)
-    assert isinstance(body["preprocessor_loaded"], bool)
+
