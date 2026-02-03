@@ -178,7 +178,8 @@ stage('Smoke Test (/health + /predict)') {
         echo ===== smoke test /predict =====
 
         rem IMPORTANT: match test_predict.py payload keys
-        set JSON={\\"Acceleration\\":5.0,\\"TopSpeed_KmH\\":180,\\"Range_Km\\":420,\\"Battery_kWh\\":75,\\"Efficiency_WhKm\\":170,\\"FastCharge_kW\\":150,\\"Seats\\":5,\\"PriceEuro\\":45000,\\"PowerTrain\\":\\"AWD\\"}
+        set JSON={\"event_ts\":\"2026-01-24 10:00:00\",\"baseline_queue_min\":12.0,\"shortage_flag\":0,\"replenishment_eta_min\":0.0,\"machine_state\":\"RUN\",\"queue_time_min\":10.0,\"down_minutes_last_60\":0.0}
+
 
         rem Print HTTP code + body. Fail pipeline if not 200.
         kubectl -n %NS% run %POD% --rm -i --restart=Never --image=curlimages/curl -- ^
