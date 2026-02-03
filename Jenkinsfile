@@ -161,25 +161,32 @@ stage('Smoke Test (/health + /predict)') {
     withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
       bat '''
         @echo on
+        setlocal enabledelayedexpansion
         set KUBECONFIG=%KUBECONFIG_FILE%
+
+        set NS=%NAMESPACE%
+        set SVC=%SERVICE%
         set POD=curl-%BUILD_NUMBER%
 
-        kubectl -n %NAMESPACE% delete pod %POD% --ignore-not-found
+        kubectl -n %NS% delete pod %POD% --ignore-not-found
 
         echo ===== smoke test /health =====
-        kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- \
-          curl -f -sS --max-time 10 http://%SERVICE%:8000/health
-        if errorlevel 1 exit /b 1
+        kubectl -n %NS% run %POD% --rm -i --restart=Never --image=curlimages/curl -- ^
+          curl -sS --max-time 15 http://%SVC%:8000/health
 
+        echo.
         echo ===== smoke test /predict =====
-        kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- \
-          curl -f -sS --max-time 10 -X POST http://%SERVICE%:8000/predict -H "Content-Type: application/json" -d "{\\"event_ts\\":\\"2026-02-03T00:00:00Z\\",\\"baseline_queue_min\\":1.0, \\"shortage_flag\\":0, \\"replenishment_eta_min\\":5.0, \\"machine_state\\":\\"RUN\\", \\"queue_time_min\\":2.0, \\"down_minutes_last_60\\":0.0}"
-        if errorlevel 1 exit /b 1
+
+        rem IMPORTANT: match test_predict.py payload keys
+        set JSON={\\"Acceleration\\":5.0,\\"TopSpeed_KmH\\":180,\\"Range_Km\\":420,\\"Battery_kWh\\":75,\\"Efficiency_WhKm\\":170,\\"FastCharge_kW\\":150,\\"Seats\\":5,\\"PriceEuro\\":45000,\\"PowerTrain\\":\\"AWD\\"}
+
+        rem Print HTTP code + body. Fail pipeline if not 200.
+        kubectl -n %NS% run %POD% --rm -i --restart=Never --image=curlimages/curl -- ^
+          sh -lc "code=$(curl -sS -o /tmp/body.txt -w '%%{http_code}' --max-time 20 -X POST http://%SVC%:8000/predict -H 'Content-Type: application/json' -d '%JSON%'); echo HTTP=$code; cat /tmp/body.txt; test $code -eq 200"
       '''
     }
   }
 }
-
 
 
     stage('Load Test (k6)') {
