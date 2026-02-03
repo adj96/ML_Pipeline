@@ -160,33 +160,35 @@ stage('Smoke Test (/health + /predict)') {
   steps {
     withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
       bat '''
-        @echo on
-        setlocal enabledelayedexpansion
-        set KUBECONFIG=%KUBECONFIG_FILE%
+      setlocal enabledelayedexpansion
+      set "KUBECONFIG=%KUBECONFIG_FILE%"
+      set "NS=arvmldevopspipeline"
+      set "SVC=arvmldevopspipeline-svc"
+      set "POD=curl-smoke"
 
-        set NS=%NAMESPACE%
-        set SVC=%SERVICE%
-        set POD=curl-%BUILD_NUMBER%
+      rem ---------- /health ----------
+      echo ===== smoke test /health =====
+      kubectl -n %NS% delete pod %POD% --ignore-not-found >nul 2>nul
 
-        kubectl -n %NS% delete pod %POD% --ignore-not-found
+      kubectl -n %NS% run %POD% --rm -i --restart=Never --image=curlimages/curl -- ^
+        sh -lc "curl -sS --max-time 15 http://%SVC%:8000/health"
 
-        echo ===== smoke test /health =====
-        kubectl -n %NS% run %POD% --rm -i --restart=Never --image=curlimages/curl -- ^
-          curl -sS --max-time 15 http://%SVC%:8000/health
+      echo.
 
-      
-        echo ===== smoke test /predict =====
-        rem JSON already set in Windows:
-        rem set JSON={"event_ts":"2026-01-24 10:00:00","baseline_queue_min":12.0,"shortage_flag":0,"replenishment_eta_min":0.0,"machine_state":"RUN","queue_time_min":10.0,"down_minutes_last_60":0.0}
+      rem ---------- /predict ----------
+      echo ===== smoke test /predict =====
+      rem IMPORTANT: keys must match your FastAPI input schema / tests
+      set "JSON={\\"event_ts\\":\\"2026-01-24 10:00:00\\",\\"baseline_queue_min\\":12.0,\\"shortage_flag\\":0,\\"replenishment_eta_min\\":0.0,\\"machine_state\\":\\"RUN\\",\\"queue_time_min\\":10.0,\\"down_minutes_last_60\\":0.0}"
 
-        kubectl -n arvmldevopspipeline run curl-71 --rm -i --restart=Never --image=curlimages/curl --env="PAYLOAD=%JSON%" -- ^
-        sh -lc 'code=$(curl -sS -o /tmp/body.txt -w "%{http_code}" --max-time 20 -X POST http://arvmldevopspipeline-svc:8000/predict -H "Content-Type: application/json" -d "$PAYLOAD"); echo HTTP=$code; cat /tmp/body.txt; test $code -eq 200'
+      kubectl -n %NS% delete pod %POD% --ignore-not-found >nul 2>nul
 
-        
+      kubectl -n %NS% run %POD% --rm -i --restart=Never --image=curlimages/curl --env="PAYLOAD=%JSON%" -- ^
+        sh -lc 'code=$(curl -sS -o /tmp/body.txt -w "%{http_code}" --max-time 20 -X POST "http://%SVC%:8000/predict" -H "Content-Type: application/json" -d "$PAYLOAD"); echo HTTP=$code; cat /tmp/body.txt; test "$code" -eq 200'
       '''
     }
   }
 }
+
 
 
     stage('Load Test (k6)') {
