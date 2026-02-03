@@ -47,3 +47,24 @@ def health():
         "status": "ok",
         "model_loaded": MODEL_LOADED,
     }
+
+class PredictRequest(BaseModel):
+    event_ts: str
+    baseline_queue_min: float
+    shortage_flag: int
+    replenishment_eta_min: float
+    machine_state: Literal["RUN", "DOWN", "IDLE"]
+    queue_time_min: float
+    down_minutes_last_60: float
+
+@app.post("/predict")
+def predict(req: PredictRequest):
+    if not MODEL_LOADED or MODEL is None:
+        return {"error": "model not loaded"}
+
+    X = pd.DataFrame([req.model_dump()])
+
+    # If MODEL is a sklearn Pipeline (preprocess+model), this will work directly
+    y = MODEL.predict(X)
+
+    return {"prediction": float(y[0])}
