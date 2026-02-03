@@ -2,7 +2,7 @@
 import os
 import joblib
 from fastapi import FastAPI
-
+from pydantic import BaseModel
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 
