@@ -170,7 +170,7 @@ stage('Smoke Test (/health + /predict)') {
       echo ===== smoke test /health =====
       kubectl -n %NS% delete pod %POD% --ignore-not-found >nul 2>nul
 
-      kubectl -n %NS% run %POD% --rm -i --restart=Never --image=curlimages/curl -- ^
+      kubectl -n %NS% run %POD% -i --restart=Never --image=curlimages/curl -- ^
         sh -lc "curl -sS --max-time 15 http://%SVC%:8000/health"
 
       echo.
@@ -182,7 +182,7 @@ stage('Smoke Test (/health + /predict)') {
 
       kubectl -n %NS% delete pod %POD% --ignore-not-found >nul 2>nul
 
-      kubectl -n arvmldevopspipeline run curl-smoke --rm -i --restart=Never --image=curlimages/curl --env="PAYLOAD={\"event_ts\":\"2026-01-24 10:00:00\",\"baseline_queue_min\":12.0,\"shortage_flag\":0,\"replenishment_eta_min\":0.0,\"machine_state\":\"RUN\",\"queue_time_min\":10.0,\"down_minutes_last_60\":0.0}" -- ^
+      kubectl -n arvmldevopspipeline run curl-smoke -i --restart=Never --image=curlimages/curl --env="PAYLOAD={\"event_ts\":\"2026-01-24 10:00:00\",\"baseline_queue_min\":12.0,\"shortage_flag\":0,\"replenishment_eta_min\":0.0,\"machine_state\":\"RUN\",\"queue_time_min\":10.0,\"down_minutes_last_60\":0.0}" -- ^
   sh -lc "code=$(curl -sS -o /tmp/body.txt -w '%{http_code}' -H 'Content-Type: application/json' -d \"$PAYLOAD\" http://arvmldevopspipeline-svc:8000/predict); echo HTTP=$code; cat /tmp/body.txt; test $code -eq 200"
 
 
