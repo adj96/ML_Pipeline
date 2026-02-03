@@ -183,7 +183,8 @@ stage('Smoke Test (/health + /predict)') {
       kubectl -n %NS% delete pod %POD% --ignore-not-found >nul 2>nul
 
       kubectl -n %NS% run %POD% --rm -i --restart=Never --image=curlimages/curl --env="PAYLOAD=%JSON%" -- ^
-        sh -lc 'code=$(curl -sS -o /tmp/body.txt -w "%{http_code}" --max-time 20 -X POST "http://%SVC%:8000/predict" -H "Content-Type: application/json" -d "$PAYLOAD"); echo HTTP=$code; cat /tmp/body.txt; test "$code" -eq 200'
+      code=$(curl -sS -o /tmp/body.txt -w "%{http_code}" --max-time 20 -X POST "http://arvmldevopspipeline-svc:8000/predict" -H "Content-Type: application/json" -d "$PAYLOAD")
+
       '''
     }
   }
