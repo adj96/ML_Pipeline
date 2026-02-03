@@ -1,8 +1,7 @@
-# src/app.py
 import os
 import joblib
-import pandas as pd
-from fastapi import FastAPI
+import pandas as pd  # <-- ADD THIS
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
@@ -17,18 +16,13 @@ PREPROCESSOR_LOADED = False
 MODEL_PATH = os.getenv("MODEL_PATH", "/app/models/model.joblib")
 
 def _infer_preprocessor_loaded(obj) -> bool:
-    # Case A: full Pipeline (preprocess + model)
     if isinstance(obj, Pipeline):
-        # if any step is ColumnTransformer or has transform()
         for _, step in obj.steps:
             if isinstance(step, ColumnTransformer) or hasattr(step, "transform"):
                 return True
         return False
-
-    # Case B: standalone preprocessor mistakenly saved as "model.joblib"
     if isinstance(obj, ColumnTransformer) or hasattr(obj, "transform"):
         return True
-
     return False
 
 @app.on_event("startup")
@@ -62,11 +56,11 @@ class PredictRequest(BaseModel):
 @app.post("/predict")
 def predict(req: PredictRequest):
     if not MODEL_LOADED or MODEL is None:
-        return {"error": "model not loaded"}
+        raise HTTPException(status_code=503, detail="model not loaded")
 
-    X = pd.DataFrame([req.model_dump()])
-
-    # If MODEL is a sklearn Pipeline (preprocess+model), this will work directly
-    y = MODEL.predict(X)
-
-    return {"prediction": float(y[0])}
+    try:
+        X = pd.DataFrame([req.model_dump()])
+        y = MODEL.predict(X)
+        return {"prediction": float(y[0])}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
