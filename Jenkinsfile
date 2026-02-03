@@ -177,7 +177,6 @@ stage('Smoke Test (/health)') {
               -d "{\\"event_ts\\":2026-01-24,\\"baseline_queue_min\\":12.0,\\"shortage_flag\\":0,\\"replenishment_eta_min\\":0.0,\\"machine_state\\":RUN,\\"queue_time_min\\":10.0,\\"down_minutes_last_60\\":0.0\\"}" ^
               || exit /b 1
           '''
-          '''
           
         }
       }
