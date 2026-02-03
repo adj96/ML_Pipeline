@@ -156,32 +156,29 @@ pipeline {
       }
     }
 
-setlocal enabledelayedexpansion
-set "NS=arvmldevopspipeline"
-set "SVC=arvmldevopspipeline-svc"
+stage('Smoke Test (/health + /predict)') {
+  steps {
+    withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
+      bat '''
+        @echo on
+        set KUBECONFIG=%KUBECONFIG_FILE%
+        set POD=curl-%BUILD_NUMBER%
 
-echo ===== smoke test /health =====
-kubectl -n %NS% delete pod curl-smoke --ignore-not-found 1>nul 2>nul
-kubectl -n %NS% run curl-smoke -i --restart=Never --image=curlimages/curl -- ^
-  sh -lc "curl -sS --max-time 15 http://%SVC%:8000/health"
+        kubectl -n %NAMESPACE% delete pod %POD% --ignore-not-found
 
-echo.
-echo ===== smoke test /predict =====
+        echo ===== smoke test /health =====
+        kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- \
+          curl -f -sS --max-time 10 http://%SERVICE%:8000/health
+        if errorlevel 1 exit /b 1
 
-REM Build payload safely as Base64 (Windows side)
-for /f "usebackq delims=" %%A in (`powershell -NoProfile -Command ^
-  "[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('{\"event_ts\":\"2026-01-24 10:00:00\",\"baseline_queue_min\":12.0,\"shortage_flag\":0,\"replenishment_eta_min\":0.0,\"machine_state\":\"RUN\",\"queue_time_min\":10.0,\"down_minutes_last_60\":0.0}'))"`) do (
-  set "PAYLOAD_B64=%%A"
-)
-
-kubectl -n %NS% delete pod curl-smoke --ignore-not-found 1>nul 2>nul
-
-REM Run curl inside cluster; decode payload; fail pipeline if HTTP != 200
-kubectl -n %NS% run curl-smoke -i --restart=Never --image=curlimages/curl --env="PAYLOAD_B64=!PAYLOAD_B64!" -- ^
-  sh -lc "echo $PAYLOAD_B64 | base64 -d > /tmp/p.json && \
-          code=$(curl -sS -o /tmp/body.txt -w '%%{http_code}' -H 'Content-Type: application/json' --data-binary @/tmp/p.json http://%SVC%:8000/predict) && \
-          echo HTTP=$code && cat /tmp/body.txt && test $code -eq 200"
-
+        echo ===== smoke test /predict =====
+        kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- \
+          curl -f -sS --max-time 10 -X POST http://%SERVICE%:8000/predict -H "Content-Type: application/json" -d "{\\"event_ts\\":\\"2026-02-03T00:00:00Z\\",\\"baseline_queue_min\\":1.0, \\"shortage_flag\\":0, \\"replenishment_eta_min\\":5.0, \\"machine_state\\":\\"RUN\\", \\"queue_time_min\\":2.0, \\"down_minutes_last_60\\":0.0}"
+        if errorlevel 1 exit /b 1
+      '''
+    }
+  }
+}
 
 
 
