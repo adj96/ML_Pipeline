@@ -46,5 +46,4 @@ def health():
     return {
         "status": "ok",
         "model_loaded": MODEL_LOADED,
-        "preprocessor_loaded": PREPROCESSOR_LOADED,
     }
