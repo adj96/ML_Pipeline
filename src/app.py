@@ -1,6 +1,7 @@
 # src/app.py
 import os
 import joblib
+import pandas as pd
 from fastapi import FastAPI
 from pydantic import BaseModel
 from sklearn.pipeline import Pipeline
