@@ -5,7 +5,10 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
-from typing import Literal
+from typing import
+import logging
+
+logger = logging.getLogger("uvicorn.error")Literal
 
 app = FastAPI()
 
@@ -54,13 +57,11 @@ class PredictRequest(BaseModel):
     down_minutes_last_60: float
 
 @app.post("/predict")
-def predict(req: PredictRequest):
-    if not MODEL_LOADED or MODEL is None:
-        raise HTTPException(status_code=503, detail="model not loaded")
-
+def predict(payload: PredictIn):
     try:
-        X = pd.DataFrame([req.model_dump()])
-        y = MODEL.predict(X)
-        return {"prediction": float(y[0])}
+        X = pd.DataFrame([payload.model_dump()])
+        yhat = model.predict(X)
+        return {"prediction": float(yhat[0])}
     except Exception as e:
+        logger.exception("Predict failed")  # prints full traceback to kubectl logs
         raise HTTPException(status_code=500, detail=str(e))
