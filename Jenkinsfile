@@ -156,40 +156,32 @@ pipeline {
       }
     }
 
-stage('Smoke Test (/health + /predict)') {
-  steps {
-    withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
-      bat '''
-      setlocal enabledelayedexpansion
-      set "KUBECONFIG=%KUBECONFIG_FILE%"
-      set "NS=arvmldevopspipeline"
-      set "SVC=arvmldevopspipeline-svc"
-      set "POD=curl-smoke"
+setlocal enabledelayedexpansion
+set "NS=arvmldevopspipeline"
+set "SVC=arvmldevopspipeline-svc"
 
-      rem ---------- /health ----------
-      echo ===== smoke test /health =====
-      kubectl -n %NS% delete pod %POD% --ignore-not-found >nul 2>nul
+echo ===== smoke test /health =====
+kubectl -n %NS% delete pod curl-smoke --ignore-not-found 1>nul 2>nul
+kubectl -n %NS% run curl-smoke -i --restart=Never --image=curlimages/curl -- ^
+  sh -lc "curl -sS --max-time 15 http://%SVC%:8000/health"
 
-      kubectl -n %NS% run %POD% -i --restart=Never --image=curlimages/curl -- ^
-        sh -lc "curl -sS --max-time 15 http://%SVC%:8000/health"
+echo.
+echo ===== smoke test /predict =====
 
-      echo.
+REM Build payload safely as Base64 (Windows side)
+for /f "usebackq delims=" %%A in (`powershell -NoProfile -Command ^
+  "[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('{\"event_ts\":\"2026-01-24 10:00:00\",\"baseline_queue_min\":12.0,\"shortage_flag\":0,\"replenishment_eta_min\":0.0,\"machine_state\":\"RUN\",\"queue_time_min\":10.0,\"down_minutes_last_60\":0.0}'))"`) do (
+  set "PAYLOAD_B64=%%A"
+)
 
-      rem ---------- /predict ----------
-      echo ===== smoke test /predict =====
-      rem IMPORTANT: keys must match your FastAPI input schema / tests
-      set "JSON={\\"event_ts\\":\\"2026-01-24 10:00:00\\",\\"baseline_queue_min\\":12.0,\\"shortage_flag\\":0,\\"replenishment_eta_min\\":0.0,\\"machine_state\\":\\"RUN\\",\\"queue_time_min\\":10.0,\\"down_minutes_last_60\\":0.0}"
+kubectl -n %NS% delete pod curl-smoke --ignore-not-found 1>nul 2>nul
 
-      kubectl -n %NS% delete pod %POD% --ignore-not-found >nul 2>nul
+REM Run curl inside cluster; decode payload; fail pipeline if HTTP != 200
+kubectl -n %NS% run curl-smoke -i --restart=Never --image=curlimages/curl --env="PAYLOAD_B64=!PAYLOAD_B64!" -- ^
+  sh -lc "echo $PAYLOAD_B64 | base64 -d > /tmp/p.json && \
+          code=$(curl -sS -o /tmp/body.txt -w '%%{http_code}' -H 'Content-Type: application/json' --data-binary @/tmp/p.json http://%SVC%:8000/predict) && \
+          echo HTTP=$code && cat /tmp/body.txt && test $code -eq 200"
 
-      kubectl -n arvmldevopspipeline run curl-smoke -i --restart=Never --image=curlimages/curl --env="PAYLOAD={\"event_ts\":\"2026-01-24 10:00:00\",\"baseline_queue_min\":12.0,\"shortage_flag\":0,\"replenishment_eta_min\":0.0,\"machine_state\":\"RUN\",\"queue_time_min\":10.0,\"down_minutes_last_60\":0.0}" -- ^
-  sh -lc "code=$(curl -sS -o /tmp/body.txt -w '%{http_code}' -H 'Content-Type: application/json' -d \"$PAYLOAD\" http://arvmldevopspipeline-svc:8000/predict); echo HTTP=$code; cat /tmp/body.txt; test $code -eq 200"
-
-
-      '''
-    }
-  }
-}
 
 
 
