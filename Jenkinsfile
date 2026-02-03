@@ -156,23 +156,39 @@ pipeline {
       }
     }
 
-stage('Smoke Test (/health)') {
-      steps {
-        withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
-          bat '''
-            @echo on
-            set KUBECONFIG=%KUBECONFIG_FILE%
+stage('Smoke Test (/health + /predict)') {
+  steps {
+    withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
+      bat '''
+        @echo on
+        set KUBECONFIG=%KUBECONFIG_FILE%
+        set POD=curl-%BUILD_NUMBER%
 
-            set POD=curl-%BUILD_NUMBER%
+        kubectl -n %NAMESPACE% delete pod %POD% --ignore-not-found
 
-            kubectl -n %NAMESPACE% delete pod %POD% --ignore-not-found
+        echo ===== smoke test /health (strict) =====
+        kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- ^
+          sh -lc "set -e; ^
+            r=$(curl -fsS --max-time 10 http://%SERVICE%:8000/health); ^
+            echo $r; ^
+            echo $r | grep -q '\\\"status\\\":\\\"ok\\\"'; ^
+            echo $r | grep -q '\\\"model_loaded\\\":'"
 
-            kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- ^
-              curl -sS http://%SERVICE%:8000/health || exit /b 1
-          '''
-        }
-      }
+        echo ===== smoke test /predict (strict) =====
+        kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- ^
+          sh -lc "set -e; ^
+            payload='{\"event_ts\":\"2026-02-03T00:00:00Z\",\"baseline_queue_min\":1.0,\"shortage_flag\":0,\"replenishment_eta_min\":5.0,\"machine_state\":\"RUN\",\"queue_time_min\":2.0,\"down_minutes_last_60\":0.0}'; ^
+            code=$(curl -sS -o /tmp/out -w \"%%{http_code}\" --max-time 10 -H \"Content-Type: application/json\" -d \"$payload\" http://%SERVICE%:8000/predict || true); ^
+            body=$(cat /tmp/out || true); ^
+            echo HTTP_CODE=$code; ^
+            echo $body; ^
+            if [ \"$code\" != \"200\" ] && [ \"$code\" != \"503\" ]; then exit 1; fi; ^
+            echo $body | grep -Eq '\\\"prediction\\\"|\\\"error\\\"'"
+      '''
     }
+  }
+}
+
 
     stage('Load Test (k6)') {
       steps {
