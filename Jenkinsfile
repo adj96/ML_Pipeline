@@ -174,16 +174,15 @@ stage('Smoke Test (/health + /predict)') {
         kubectl -n %NS% run %POD% --rm -i --restart=Never --image=curlimages/curl -- ^
           curl -sS --max-time 15 http://%SVC%:8000/health
 
-        echo.
+      
         echo ===== smoke test /predict =====
+        rem JSON already set in Windows:
+        rem set JSON={"event_ts":"2026-01-24 10:00:00","baseline_queue_min":12.0,"shortage_flag":0,"replenishment_eta_min":0.0,"machine_state":"RUN","queue_time_min":10.0,"down_minutes_last_60":0.0}
 
-        rem IMPORTANT: match test_predict.py payload keys
-        set JSON={\"event_ts\":\"2026-01-24 10:00:00\",\"baseline_queue_min\":12.0,\"shortage_flag\":0,\"replenishment_eta_min\":0.0,\"machine_state\":\"RUN\",\"queue_time_min\":10.0,\"down_minutes_last_60\":0.0}
+        kubectl -n arvmldevopspipeline run curl-71 --rm -i --restart=Never --image=curlimages/curl --env="PAYLOAD=%JSON%" -- ^
+        sh -lc 'code=$(curl -sS -o /tmp/body.txt -w "%{http_code}" --max-time 20 -X POST http://arvmldevopspipeline-svc:8000/predict -H "Content-Type: application/json" -d "$PAYLOAD"); echo HTTP=$code; cat /tmp/body.txt; test $code -eq 200'
 
-
-        rem Print HTTP code + body. Fail pipeline if not 200.
-        kubectl -n %NS% run %POD% --rm -i --restart=Never --image=curlimages/curl -- ^
-          sh -lc "code=$(curl -sS -o /tmp/body.txt -w '%%{http_code}' --max-time 20 -X POST http://%SVC%:8000/predict -H 'Content-Type: application/json' -d '%JSON%'); echo HTTP=$code; cat /tmp/body.txt; test $code -eq 200"
+        
       '''
     }
   }
