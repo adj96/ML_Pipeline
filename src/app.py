@@ -1,6 +1,6 @@
 import os
 import joblib
-import pandas as pd  # <-- ADD THIS
+import pandas as pd
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from sklearn.pipeline import Pipeline
@@ -9,7 +9,8 @@ from typing import Literal
 
 app = FastAPI()
 
-MODEL = None
+ARTIFACT = None           # can be dict or estimator
+MODEL = None              # must be estimator/pipeline with .predict
 MODEL_LOADED = False
 PREPROCESSOR_LOADED = False
 
@@ -27,21 +28,39 @@ def _infer_preprocessor_loaded(obj) -> bool:
 
 @app.on_event("startup")
 def load_artifact():
-    global MODEL, MODEL_LOADED, PREPROCESSOR_LOADED
+    global ARTIFACT, MODEL, MODEL_LOADED, PREPROCESSOR_LOADED
     try:
-        MODEL = joblib.load(MODEL_PATH)
+        ARTIFACT = joblib.load(MODEL_PATH)
+
+        # 핵심 수정: dict artifact면 pipeline을 꺼내서 MODEL로 사용
+        if isinstance(ARTIFACT, dict):
+            if "pipeline" not in ARTIFACT:
+                raise RuntimeError("model.joblib is dict but missing key: 'pipeline'")
+            MODEL = ARTIFACT["pipeline"]
+        else:
+            MODEL = ARTIFACT
+
+        # 보호: 반드시 predict 가능해야 함
+        if not hasattr(MODEL, "predict"):
+            raise RuntimeError("Loaded MODEL does not have predict()")
+
         MODEL_LOADED = True
         PREPROCESSOR_LOADED = _infer_preprocessor_loaded(MODEL)
-    except Exception:
+
+    except Exception as e:
+        ARTIFACT = None
         MODEL = None
         MODEL_LOADED = False
         PREPROCESSOR_LOADED = False
+        # 로그가 필요하면 print(e) 추가 가능 (컨테이너 로그로 확인)
+        # print(f"Model load failed: {e}")
 
 @app.get("/health")
 def health():
     return {
         "status": "ok",
         "model_loaded": MODEL_LOADED,
+        "preprocessor_loaded": PREPROCESSOR_LOADED,
     }
 
 class PredictRequest(BaseModel):
@@ -60,7 +79,7 @@ def predict(req: PredictRequest):
 
     try:
         X = pd.DataFrame([req.model_dump()])
-        y = MODEL.predict(X)
+        y = MODEL.predict(X)   # 반드시 pipeline/estimator에만 predict 호출
         return {"prediction": float(y[0])}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
