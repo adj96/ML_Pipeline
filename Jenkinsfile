@@ -218,6 +218,7 @@ stage('Smoke Test (/health + /predict)') {
             kubectl -n %NS% get svc %SERVICE% -o wide || exit /b 1
             kubectl -n %NS% get endpoints %SERVICE% -o wide || exit /b 1
 
+            del /f /q k6-job.yaml 2>nul
             echo ===== k6: create job manifest =====
             (
               echo apiVersion: batch/v1
@@ -264,6 +265,8 @@ stage('Smoke Test (/health + /predict)') {
 
             echo ===== k6: SUCCESS - final logs =====
             kubectl -n %NS% logs -l app=k6 --tail=-1
+            echo ===== cleanup generated job yaml (workspace) =====
+        del /f /q k6-job.yaml 2>nul
           '''
         }
       }
