@@ -5,54 +5,48 @@ import numpy as np
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import Literal
+from typing import Literal, Optional
 
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 
-# ======================================================
-# App
-# ======================================================
 app = FastAPI()
 
-# ======================================================
-# Globals
-# ======================================================
 MODEL = None
 MODEL_LOADED = False
 PREPROCESSOR_LOADED = False
 
 MODEL_PATH = os.getenv("MODEL_PATH", os.path.join("models", "model.joblib"))
 
-# ======================================================
-# Helpers
-# ======================================================
+# These are the columns your model is complaining about.
+# Defaults are neutral placeholders; replace with real domain defaults if you have them.
+MISSING_DEFAULTS = {
+    "line_speed_m_min": 0.0,
+    "vibration_mm_s": 0.0,
+    "inspection_interval_hrs": 0.0,
+    "material_grade": "UNKNOWN",
+    "operator_experience_yrs": 0.0,
+    "humidity_pct": 0.0,
+    "temperature_c": 0.0,
+    "pressure_kpa": 0.0,
+    "shift": "UNKNOWN",
+    "machine_age_days": 0.0,
+}
+
 def _extract_model(obj):
-    """
-    Accepts:
-    - sklearn Pipeline
-    - dict containing 'pipeline'
-    - dict containing 'preprocessor' + 'model'
-    """
     if isinstance(obj, Pipeline):
         return obj
 
     if isinstance(obj, dict):
-        # Preferred explicit pipeline
         if "pipeline" in obj and hasattr(obj["pipeline"], "predict"):
             return obj["pipeline"]
 
-        # Common training save pattern
         pre = obj.get("preprocessor") or obj.get("transformer")
         mdl = obj.get("model") or obj.get("estimator")
 
         if pre is not None and mdl is not None and hasattr(mdl, "predict"):
-            return Pipeline([
-                ("preprocess", pre),
-                ("model", mdl),
-            ])
+            return Pipeline([("preprocess", pre), ("model", mdl)])
 
-        # Last-chance fallback
         for v in obj.values():
             if hasattr(v, "predict"):
                 return v
@@ -82,7 +76,6 @@ def _as_float(x):
 
 def _ensure_model_loaded():
     global MODEL, MODEL_LOADED, PREPROCESSOR_LOADED
-
     if MODEL_LOADED and MODEL is not None:
         return
 
@@ -103,23 +96,18 @@ def _ensure_model_loaded():
         PREPROCESSOR_LOADED = False
 
 
-# ======================================================
-# Startup
-# ======================================================
 @app.on_event("startup")
 def startup():
     _ensure_model_loaded()
 
 
-# ======================================================
-# Endpoints
-# ======================================================
 @app.get("/health")
 def health():
     _ensure_model_loaded()
     return {
         "status": "ok",
         "model_loaded": MODEL_LOADED,
+        "preprocessor_loaded": PREPROCESSOR_LOADED,
     }
 
 
@@ -132,16 +120,34 @@ class PredictRequest(BaseModel):
     queue_time_min: float
     down_minutes_last_60: float
 
+    # Optional fields (if caller provides them, use them; else default)
+    line_speed_m_min: Optional[float] = None
+    vibration_mm_s: Optional[float] = None
+    inspection_interval_hrs: Optional[float] = None
+    material_grade: Optional[str] = None
+    operator_experience_yrs: Optional[float] = None
+    humidity_pct: Optional[float] = None
+    temperature_c: Optional[float] = None
+    pressure_kpa: Optional[float] = None
+    shift: Optional[str] = None
+    machine_age_days: Optional[float] = None
+
 
 @app.post("/predict")
 def predict(req: PredictRequest):
     _ensure_model_loaded()
-
     if not MODEL_LOADED or MODEL is None:
         raise HTTPException(status_code=503, detail="model not loaded")
 
     try:
-        X = pd.DataFrame([req.model_dump()])
+        data = req.model_dump()
+
+        # Fill any missing/None optional fields with defaults
+        for k, v in MISSING_DEFAULTS.items():
+            if k not in data or data[k] is None:
+                data[k] = v
+
+        X = pd.DataFrame([data])
         y = MODEL.predict(X)
         return {"prediction": _as_float(y)}
 
