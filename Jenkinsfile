@@ -1,13 +1,19 @@
 pipeline {
   agent any
+
   options { timestamps() }
 
   environment {
+    // Docker Hub repo (must exist under your Docker Hub username)
     IMAGE_REPO = "arvind2733/arvmldevopspipeline"
+
+    // Kubernetes identity
     NAMESPACE  = "arvmldevopspipeline"
-    APP_NAME   = "arvmldevopspipeline"
-    CONTAINER  = "arvmldevopspipeline"
-    SERVICE    = "arvmldevopspipeline-svc"
+    APP_NAME   = "arvmldevopspipeline"        // Deployment name
+    CONTAINER  = "arvmldevopspipeline"        // Container name in Deployment spec
+    SERVICE    = "arvmldevopspipeline-svc"    // Service name
+
+    // Paths in repo
     K8S_DIR    = "k8s"
     K6_SCRIPT  = "loadtest\\k6.js"
   }
@@ -31,9 +37,11 @@ pipeline {
       steps {
         script {
           env.SHORTSHA = bat(returnStdout: true, script: '@echo off\r\ngit rev-parse --short=7 HEAD').trim()
+
           def s = bat(returnStatus: true, script: '@echo off\r\ngit describe --tags --exact-match 1> .reltag.txt 2>nul')
           env.RELTAG = (s == 0) ? readFile('.reltag.txt').trim() : ''
         }
+
         bat '''
           @echo on
           echo SHORTSHA=%SHORTSHA%
@@ -43,31 +51,40 @@ pipeline {
     }
 
     stage('QA (Unit Tests)') {
-      steps {
-        bat '''
-          @echo on
-          if not exist reports mkdir reports
+  steps {
+    bat '''
+      @echo on
+      if not exist reports mkdir reports
 
-          docker build -t %IMAGE_REPO%:test-%SHORTSHA% -f Dockerfile.test .
+      docker build -t %IMAGE_REPO%:test-%SHORTSHA% -f Dockerfile.test .
 
-          docker create --name testrun %IMAGE_REPO%:test-%SHORTSHA%
-          docker start -a testrun
+      docker create --name testrun %IMAGE_REPO%:test-%SHORTSHA%
+      docker start -a testrun
 
-          docker cp testrun:/app/reports/test-results.xml "%WORKSPACE%\\reports\\test-results.xml"
-          docker rm -f testrun
-        '''
-      }
-      post {
-        always {
-          junit 'reports/test-results.xml'
-          archiveArtifacts artifacts: 'reports/test-results.xml', fingerprint: true
-          bat 'docker image rm -f %IMAGE_REPO%:test-%SHORTSHA% 2>nul || exit /b 0'
-        }
-      }
+      docker cp testrun:/app/reports/test-results.xml "%WORKSPACE%\\reports\\test-results.xml"
+      docker rm -f testrun
+    '''
+  }
+  post {
+    always {
+      junit 'reports/test-results.xml'
+      archiveArtifacts artifacts: 'reports/test-results.xml', fingerprint: true
+      bat 'docker image rm -f %IMAGE_REPO%:test-%SHORTSHA% 2>nul || exit /b 0'
     }
+  }
+}
 
     stage('Build Image') {
       steps {
+        script {
+          if (!(env.SHORTSHA ==~ /^[0-9a-f]{7}$/)) {
+            error("SHORTSHA invalid. Expected 7-hex, got: '${env.SHORTSHA}'")
+          }
+          if (env.RELTAG && !(env.RELTAG ==~ /^[0-9A-Za-z._-]+$/)) {
+            error("RELTAG invalid. Got: '${env.RELTAG}'")
+          }
+        }
+
         bat '''
           @echo on
           echo Building image: "%IMAGE_REPO%:git-%SHORTSHA%"
@@ -113,12 +130,12 @@ pipeline {
             if not exist "%K8S_DIR%\\deployment.yaml" exit /b 1
             if not exist "%K8S_DIR%\\service.yaml" exit /b 1
 
-            kubectl apply -f %K8S_DIR%\\namespace.yaml || exit /b 1
-            kubectl apply -f %K8S_DIR%\\deployment.yaml || exit /b 1
-            kubectl apply -f %K8S_DIR%\\service.yaml || exit /b 1
+            kubectl apply -f %K8S_DIR%\\namespace.yaml
+            kubectl apply -f %K8S_DIR%\\deployment.yaml
+            kubectl apply -f %K8S_DIR%\\service.yaml
 
             echo Setting image to: %IMAGE_REPO%:git-%SHORTSHA%
-            kubectl -n %NAMESPACE% set image deployment/%APP_NAME% %CONTAINER%=%IMAGE_REPO%:git-%SHORTSHA% || exit /b 1
+            kubectl -n %NAMESPACE% set image deployment/%APP_NAME% %CONTAINER%=%IMAGE_REPO%:git-%SHORTSHA%
           '''
         }
       }
@@ -131,7 +148,7 @@ pipeline {
             @echo on
             set KUBECONFIG=%KUBECONFIG_FILE%
 
-            kubectl -n %NAMESPACE% rollout status deployment/%APP_NAME% --timeout=180s || exit /b 1
+            kubectl -n %NAMESPACE% rollout status deployment/%APP_NAME% --timeout=180s
             kubectl -n %NAMESPACE% get pods -o wide
             kubectl -n %NAMESPACE% get svc
           '''
@@ -139,34 +156,31 @@ pipeline {
       }
     }
 
-    stage('Smoke Test (/health + /predict)') {
-      steps {
-        withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
-          bat '''
-            @echo on
-            setlocal EnableExtensions EnableDelayedExpansion
-            set KUBECONFIG=%KUBECONFIG_FILE%
-            set POD=curl-%BUILD_NUMBER%
+stage('Smoke Test (/health + /predict)') {
+  steps {
+    withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
+      bat '''
+        @echo on
+        set KUBECONFIG=%KUBECONFIG_FILE%
+        set POD=curl-%BUILD_NUMBER%
 
-            kubectl -n %NAMESPACE% delete pod %POD% --ignore-not-found >nul 2>nul
+        kubectl -n %NAMESPACE% delete pod %POD% --ignore-not-found
 
-            echo ===== smoke test /health =====
-            kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- ^
-              curl -sS -i --max-time 10 http://%SERVICE%:8000/health ^
-              || exit /b 1
+        echo ===== smoke test /health =====
+        kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- \
+          curl -f -sS --max-time 10 http://%SERVICE%:8000/health
+        if errorlevel 1 exit /b 1
 
-            echo ===== smoke test /predict =====
-            kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- ^
-              curl -sS -X POST http://%SERVICE%:8000/predict ^
-              -H "Content-Type: application/json" ^
-              -d "{\\"event_ts\\":\\"2026-02-03T00:00:00Z\\",\\"baseline_queue_min\\":1.0,\\"shortage_flag\\":0,\\"replenishment_eta_min\\":5.0,\\"machine_state\\":\\"RUN\\",\\"queue_time_min\\":2.0,\\"down_minutes_last_60\\":0.0}" ^
-              || exit /b 1
-
-            endlocal
-          '''
-        }
-      }
+        echo ===== smoke test /predict =====
+        kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- \
+          curl -f -sS --max-time 10 -X POST http://%SERVICE%:8000/predict -H "Content-Type: application/json" -d "{\\"event_ts\\":\\"2026-02-03T00:00:00Z\\",\\"baseline_queue_min\\":1.0, \\"shortage_flag\\":0, \\"replenishment_eta_min\\":5.0, \\"machine_state\\":\\"RUN\\", \\"queue_time_min\\":2.0, \\"down_minutes_last_60\\":0.0}"
+        if errorlevel 1 exit /b 1
+      '''
     }
+  }
+}
+
+
 
     stage('Load Test (k6)') {
       steps {
@@ -186,11 +200,18 @@ pipeline {
               exit /b 1
             )
 
+            echo ===== k6: cleanup old resources =====
             kubectl -n %NS% delete job %JOB% --ignore-not-found
             kubectl -n %NS% delete configmap %CM% --ignore-not-found
 
+            echo ===== k6: create configmap from script =====
             kubectl -n %NS% create configmap %CM% --from-file=k6.js="%SCRIPT%" || exit /b 1
 
+            echo ===== validate service/endpoints =====
+            kubectl -n %NS% get svc %SERVICE% -o wide || exit /b 1
+            kubectl -n %NS% get endpoints %SERVICE% -o wide || exit /b 1
+
+            echo ===== k6: create job manifest =====
             (
               echo apiVersion: batch/v1
               echo kind: Job
@@ -223,15 +244,18 @@ pipeline {
 
             kubectl apply -f k6-job.yaml || exit /b 1
 
+            echo ===== k6: wait for completion (5 min) =====
             kubectl -n %NS% wait --for=condition=complete job/%JOB% --timeout=300s
             set RC=%ERRORLEVEL%
 
             if not "%RC%"=="0" (
+              echo ===== k6: FAILED - debugging =====
               kubectl -n %NS% describe job/%JOB%
               kubectl -n %NS% logs -l app=k6 --tail=-1
               exit /b 1
             )
 
+            echo ===== k6: SUCCESS - final logs =====
             kubectl -n %NS% logs -l app=k6 --tail=-1
           '''
         }
@@ -241,11 +265,8 @@ pipeline {
 
   post {
     always {
-      bat '''
-        @echo on
-        del /q k6-job.yaml 2>nul
-      '''
-      archiveArtifacts artifacts: 'k8s/**/*,loadtest/**/*,Dockerfile,Dockerfile.test,Jenkinsfile,requirements.txt,README.md,reports/**/*', fingerprint: true
+      archiveArtifacts artifacts: 'k8s/**/*,loadtest/**/*,Dockerfile,Jenkinsfile,requirements.txt,README.md', fingerprint: true
     }
   }
 }
+
