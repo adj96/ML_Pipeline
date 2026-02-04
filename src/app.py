@@ -32,7 +32,14 @@ def load_artifact():
     try:
         ARTIFACT = joblib.load(MODEL_PATH)
 
-        # 핵심 수정: dict artifact면 pipeline을 꺼내서 MODEL로 사용
+        # HARD LOGGING (startup proof)
+        print("MODEL_PATH =", MODEL_PATH, flush=True)
+        print("ARTIFACT_TYPE =", type(ARTIFACT), flush=True)
+        print("ARTIFACT_IS_DICT =", isinstance(ARTIFACT, dict), flush=True)
+        if isinstance(ARTIFACT, dict):
+            print("ARTIFACT_KEYS =", list(ARTIFACT.keys()), flush=True)
+
+        # dict artifact -> extract pipeline
         if isinstance(ARTIFACT, dict):
             if "pipeline" not in ARTIFACT:
                 raise RuntimeError("model.joblib is dict but missing key: 'pipeline'")
@@ -40,7 +47,10 @@ def load_artifact():
         else:
             MODEL = ARTIFACT
 
-        # 보호: 반드시 predict 가능해야 함
+        # log final MODEL object used for prediction
+        print("MODEL_TYPE =", type(MODEL), flush=True)
+        print("MODEL_HAS_PREDICT =", hasattr(MODEL, "predict"), flush=True)
+
         if not hasattr(MODEL, "predict"):
             raise RuntimeError("Loaded MODEL does not have predict()")
 
@@ -48,13 +58,12 @@ def load_artifact():
         PREPROCESSOR_LOADED = _infer_preprocessor_loaded(MODEL)
 
     except Exception as e:
+        print("MODEL_LOAD_FAILED =", str(e), flush=True)
         ARTIFACT = None
         MODEL = None
         MODEL_LOADED = False
         PREPROCESSOR_LOADED = False
-        # 로그가 필요하면 print(e) 추가 가능 (컨테이너 로그로 확인)
-        # print(f"Model load failed: {e}")
-
+        
 @app.get("/health")
 def health():
     return {
