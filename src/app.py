@@ -94,14 +94,30 @@ def health():
     }
 
 class PredictRequest(BaseModel):
-    # keep your current API contract for now
     event_ts: str
-    baseline_queue_min: float
-    shortage_flag: int
-    replenishment_eta_min: float
+    priority_urgent: int = Field(ge=0, le=1)
+    line_id: str
+    product_family: str
+    station: str
+    shift: str
+    remaining_units: int = Field(ge=0)
+    queue_time_min: float = Field(ge=0)
+    queue_length: int = Field(ge=0)
     machine_state: Literal["RUN", "DOWN", "IDLE"]
-    queue_time_min: float
-    down_minutes_last_60: float
+    down_minutes_last_60: float = Field(ge=0)
+    alarm_rate_last_30: float = Field(ge=0)
+    cycle_time_expected_sec: float = Field(ge=0)
+    cycle_time_actual_sec: float = Field(ge=0)
+    cycle_time_deviation: float
+    shortage_flag: int = Field(ge=0, le=1)
+    replenishment_eta_min: float = Field(ge=0)
+    shortage_severity: float = Field(ge=0)
+    operator_present: int = Field(ge=0, le=1)
+    skill_level: str
+    coverage_ratio: float = Field(ge=0)
+    baseline_queue_min: float = Field(ge=0)
+    station_backlog_ratio: float = Field(ge=0)
+    delay_flag: int = Field(ge=0, le=1)
 
 @app.post("/predict")
 def predict(req: PredictRequest):
