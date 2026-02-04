@@ -2,7 +2,7 @@ import os
 import joblib
 import pandas as pd
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from typing import Literal, Optional, Any
