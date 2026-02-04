@@ -120,17 +120,12 @@ pipeline {
           bat '''
             @echo on
             set KUBECONFIG=%KUBECONFIG_FILE%
+            kubectl apply -f k8s\namespace.yaml || exit /b 1
+            kubectl apply -f k8s\deployment.yaml || exit /b 1
+            kubectl apply -f k8s\service.yaml || exit /b 1
+            
+            kubectl -n arvmldevopspipeline set image deployment/arvmldevopspipeline arvmldevopspipeline=arvind2733/arvmldevopspipeline:git-%SHORTSHA% || exit /b 1
 
-            if not exist "%K8S_DIR%\\namespace.yaml" exit /b 1
-            if not exist "%K8S_DIR%\\deployment.yaml" exit /b 1
-            if not exist "%K8S_DIR%\\service.yaml" exit /b 1
-
-            kubectl apply -f %K8S_DIR%\\namespace.yaml
-            kubectl apply -f %K8S_DIR%\\deployment.yaml
-            kubectl apply -f %K8S_DIR%\\service.yaml
-
-            echo Setting image to: %IMAGE_REPO%:git-%SHORTSHA%
-            kubectl -n %NAMESPACE% set image deployment/%APP_NAME% %CONTAINER%=%IMAGE_REPO%:git-%SHORTSHA%
           '''
         }
       }
