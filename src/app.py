@@ -7,8 +7,7 @@ from pydantic import BaseModel
 MODEL_PATH = os.getenv("MODEL_PATH", "/app/models/model.joblib")
 
 app = FastAPI()
-
-model = None  # this will be the full sklearn Pipeline (preprocess + estimator)
+model = None  # full sklearn Pipeline (preprocess + estimator)
 
 
 class PredictRequest(BaseModel):
@@ -24,11 +23,7 @@ class PredictRequest(BaseModel):
 @app.on_event("startup")
 def load_artifacts():
     global model
-    try:
-        model = joblib.load(MODEL_PATH)
-    except Exception as e:
-        model = None
-        raise RuntimeError(f"Failed to load model pipeline from {MODEL_PATH}: {e}")
+    model = joblib.load(MODEL_PATH)
 
 
 @app.get("/health")
@@ -36,7 +31,7 @@ def health():
     return {
         "status": "ok",
         "model_loaded": model is not None,
-        "preprocessor_loaded": model is not None,  # pipeline includes preprocessing
+        "preprocessor_loaded": model is not None,
         "model_path": MODEL_PATH,
     }
 
@@ -46,7 +41,6 @@ def predict(req: PredictRequest):
     if model is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
 
-    # Build 1-row DataFrame with the exact feature names expected by the pipeline
     X = pd.DataFrame([{
         "event_ts": req.event_ts,
         "baseline_queue_min": req.baseline_queue_min,
@@ -57,9 +51,5 @@ def predict(req: PredictRequest):
         "down_minutes_last_60": req.down_minutes_last_60,
     }])
 
-    try:
-        yhat = model.predict(X)
-        pred = float(yhat[0])
-        return {"prediction": pred}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Prediction failed: {e}")
+    yhat = model.predict(X)
+    return {"prediction": float(yhat[0])}
