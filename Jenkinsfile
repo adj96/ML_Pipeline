@@ -220,7 +220,7 @@ stage('Smoke Test (/health + /predict)') {
 
             echo ===== validate service/endpoints =====
             kubectl -n %NS% get svc %SERVICE% -o wide || exit /b 1
-            kubectl -n %NS% get endpoints %SERVICE% -o wide || exit /b 1
+            kubectl -n %NS% get endpointslice -l kubernetes.io/service-name=%SERVICE% -o wide || exit /b 1
 
             echo ===== k6: create job manifest =====
             (
