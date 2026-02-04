@@ -5,14 +5,17 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
-from typing import Literal
+from typing import Literal, Optional, Any
 
 app = FastAPI()
 
-ARTIFACT = None           # can be dict or estimator
-MODEL = None              # must be estimator/pipeline with .predict
+ARTIFACT: Optional[Any] = None        # can be dict or estimator
+MODEL: Optional[Any] = None           # must be estimator/pipeline with .predict
 MODEL_LOADED = False
 PREPROCESSOR_LOADED = False
+
+CONTRACT: Optional[dict] = None
+FEATURE_COLUMNS: Optional[list] = None
 
 MODEL_PATH = os.getenv("MODEL_PATH", os.path.join("models", "model.joblib"))
 
@@ -28,18 +31,17 @@ def _infer_preprocessor_loaded(obj) -> bool:
 
 @app.on_event("startup")
 def load_artifact():
-    global ARTIFACT, MODEL, MODEL_LOADED, PREPROCESSOR_LOADED
+    global ARTIFACT, MODEL, MODEL_LOADED, PREPROCESSOR_LOADED, CONTRACT, FEATURE_COLUMNS
     try:
         ARTIFACT = joblib.load(MODEL_PATH)
 
-        # HARD LOGGING (startup proof)
-        print("MODEL_PATH =", MODEL_PATH, flush=True)
-        print("ARTIFACT_TYPE =", type(ARTIFACT), flush=True)
-        print("ARTIFACT_IS_DICT =", isinstance(ARTIFACT, dict), flush=True)
+        print("MODEL_PATH =", MODEL_PATH)
+        print("ARTIFACT_TYPE =", type(ARTIFACT))
+        print("ARTIFACT_IS_DICT =", isinstance(ARTIFACT, dict))
         if isinstance(ARTIFACT, dict):
-            print("ARTIFACT_KEYS =", list(ARTIFACT.keys()), flush=True)
+            print("ARTIFACT_KEYS =", list(ARTIFACT.keys()))
 
-        # dict artifact -> extract pipeline
+        # If dict artifact, model is inside ["pipeline"]
         if isinstance(ARTIFACT, dict):
             if "pipeline" not in ARTIFACT:
                 raise RuntimeError("model.joblib is dict but missing key: 'pipeline'")
@@ -47,32 +49,52 @@ def load_artifact():
         else:
             MODEL = ARTIFACT
 
-        # log final MODEL object used for prediction
-        print("MODEL_TYPE =", type(MODEL), flush=True)
-        print("MODEL_HAS_PREDICT =", hasattr(MODEL, "predict"), flush=True)
+        print("MODEL_TYPE =", type(MODEL))
+        print("MODEL_HAS_PREDICT =", hasattr(MODEL, "predict"))
 
         if not hasattr(MODEL, "predict"):
             raise RuntimeError("Loaded MODEL does not have predict()")
+
+        # Contract-driven schema (optional)
+        CONTRACT = ARTIFACT.get("contract") if isinstance(ARTIFACT, dict) else None
+        FEATURE_COLUMNS = None
+        if isinstance(CONTRACT, dict):
+            FEATURE_COLUMNS = (
+                CONTRACT.get("feature_columns")
+                or CONTRACT.get("features")
+                or CONTRACT.get("columns")
+            )
+
+        print("CONTRACT_IS_DICT =", isinstance(CONTRACT, dict))
+        print("FEATURE_COLUMNS_PRESENT =", bool(FEATURE_COLUMNS))
+        if FEATURE_COLUMNS:
+            print("FEATURE_COLUMNS_COUNT =", len(FEATURE_COLUMNS))
+            print("FEATURE_COLUMNS_SAMPLE =", FEATURE_COLUMNS[:50])
 
         MODEL_LOADED = True
         PREPROCESSOR_LOADED = _infer_preprocessor_loaded(MODEL)
 
     except Exception as e:
-        print("MODEL_LOAD_FAILED =", str(e), flush=True)
+        print("Model load failed:", repr(e))
         ARTIFACT = None
         MODEL = None
+        CONTRACT = None
+        FEATURE_COLUMNS = None
         MODEL_LOADED = False
         PREPROCESSOR_LOADED = False
-        
+
 @app.get("/health")
 def health():
     return {
         "status": "ok",
         "model_loaded": MODEL_LOADED,
         "preprocessor_loaded": PREPROCESSOR_LOADED,
+        "has_contract": isinstance(CONTRACT, dict),
+        "feature_columns_count": len(FEATURE_COLUMNS) if FEATURE_COLUMNS else 0,
     }
 
 class PredictRequest(BaseModel):
+    # keep your current API contract for now
     event_ts: str
     baseline_queue_min: float
     shortage_flag: int
@@ -88,7 +110,24 @@ def predict(req: PredictRequest):
 
     try:
         X = pd.DataFrame([req.model_dump()])
-        y = MODEL.predict(X)   # 반드시 pipeline/estimator에만 predict 호출
+
+        # Align to training schema if available
+        if FEATURE_COLUMNS:
+            missing = [c for c in FEATURE_COLUMNS if c not in X.columns]
+            extra = [c for c in X.columns if c not in FEATURE_COLUMNS]
+
+            if missing:
+                raise HTTPException(status_code=422, detail=f"missing required fields: {missing}")
+
+            if extra:
+                X = X.drop(columns=extra)
+
+            X = X[FEATURE_COLUMNS]
+
+        y = MODEL.predict(X)
         return {"prediction": float(y[0])}
+
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
