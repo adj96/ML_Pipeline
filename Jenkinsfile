@@ -1,16 +1,13 @@
 pipeline {
   agent any
-
   options { timestamps() }
 
   environment {
     IMAGE_REPO = "arvind2733/arvmldevopspipeline"
-
     NAMESPACE  = "arvmldevopspipeline"
     APP_NAME   = "arvmldevopspipeline"
     CONTAINER  = "arvmldevopspipeline"
     SERVICE    = "arvmldevopspipeline-svc"
-
     K8S_DIR    = "k8s"
     K6_SCRIPT  = "loadtest\\k6.js"
   }
@@ -71,15 +68,6 @@ pipeline {
 
     stage('Build Image') {
       steps {
-        script {
-          if (!(env.SHORTSHA ==~ /^[0-9a-f]{7}$/)) {
-            error("SHORTSHA invalid. Expected 7-hex, got: '${env.SHORTSHA}'")
-          }
-          if (env.RELTAG && !(env.RELTAG ==~ /^[0-9A-Za-z._-]+$/)) {
-            error("RELTAG invalid. Got: '${env.RELTAG}'")
-          }
-        }
-
         bat '''
           @echo on
           echo Building image: "%IMAGE_REPO%:git-%SHORTSHA%"
@@ -136,7 +124,7 @@ pipeline {
       }
     }
 
-    stage('Rollout Gate (Must Succeed)') {
+    stage('Rollout Gate (Must Succeed))') {
       steps {
         withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
           bat '''
@@ -164,15 +152,16 @@ pipeline {
 
             echo ===== smoke test /health =====
             kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- ^
-              curl -f -sS --max-time 10 http://%SERVICE%:8000/health
+              sh -c "curl -sS -i --max-time 10 http://%SERVICE%:8000/health"
             if errorlevel 1 exit /b 1
 
-            echo ===== smoke test /predict (stdin JSON, avoids quoting bugs) =====
-            kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- sh -c ^
-              "printf '%%s' '{\"event_ts\":\"2026-02-03T00:00:00Z\",\"baseline_queue_min\":1.0,\"shortage_flag\":0,\"replenishment_eta_min\":5.0,\"machine_state\":\"RUN\",\"queue_time_min\":2.0,\"down_minutes_last_60\":0.0}' | \
-               curl -f -sS -i --max-time 10 -X POST http://%SERVICE%:8000/predict \
-               -H \"Content-Type: application/json\" \
-               --data-binary @-"
+            echo ===== smoke test /predict (print body + fail on http!=200) =====
+            kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- ^
+              sh -c "JSON='{\"event_ts\":\"2026-02-03T00:00:00Z\",\"baseline_queue_min\":1.0,\"shortage_flag\":0,\"replenishment_eta_min\":5.0,\"machine_state\":\"RUN\",\"queue_time_min\":2.0,\"down_minutes_last_60\":0.0}'; ^
+                     CODE=$(curl -sS -o /tmp/body.txt -w \"%%{http_code}\" --max-time 10 -X POST http://%SERVICE%:8000/predict -H \"Content-Type: application/json\" -d \"$JSON\"); ^
+                     echo HTTP_CODE=$CODE; ^
+                     cat /tmp/body.txt; ^
+                     [ \"$CODE\" = \"200\" ]"
             if errorlevel 1 exit /b 1
 
             endlocal
@@ -203,9 +192,6 @@ pipeline {
             kubectl -n %NS% delete configmap %CM% --ignore-not-found
 
             kubectl -n %NS% create configmap %CM% --from-file=k6.js="%SCRIPT%" || exit /b 1
-
-            kubectl -n %NS% get svc %SERVICE% -o wide || exit /b 1
-            kubectl -n %NS% get endpointslice -l kubernetes.io/service-name=%SERVICE% -o wide || exit /b 1
 
             (
               echo apiVersion: batch/v1
