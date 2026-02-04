@@ -205,9 +205,8 @@ stage('Smoke Test (/health + /predict)') {
 
           kubectl -n arvmldevopspipeline create configmap smoke-payload --from-file=payload.json -o yaml --dry-run=client | kubectl apply -f -
           
-          kubectl -n arvmldevopspipeline run %POD% --rm -i --restart=Never --image=curlimages/curl -- ^
-            sh -lc 'curl -f -sS -X POST http://arvmldevopspipeline-svc:8000/predict -H "Content-Type: application/json" --data-binary @/payload/payload.json' ^
-            --overrides="{\"apiVersion\":\"v1\",\"spec\":{\"volumes\":[{\"name\":\"payload\",\"configMap\":{\"name\":\"smoke-payload\"}}],\"containers\":[{\"name\":\"curl\",\"image\":\"curlimages/curl\",\"command\":[\"sh\",\"-lc\",\"curl -f -sS -X POST http://arvmldevopspipeline-svc:8000/predict -H \\\"Content-Type: application/json\\\" --data-binary @/payload/payload.json\"],\"volumeMounts\":[{\"name\":\"payload\",\"mountPath\":\"/payload\"}]}]}}"
+    kubectl -n arvmldevopspipeline run curl-127 --rm -i --restart=Never --image=curlimages/curl ^
+  --overrides="{""apiVersion"":""v1"",""spec"":{""volumes"":[{""name"":""payload"",""configMap"":{""name"":""smoke-payload""}}],""containers"":[{""name"":""curl"",""image"":""curlimages/curl"",""command"":[""sh"",""-lc"",""curl -f -sS -X POST http://arvmldevopspipeline-svc:8000/predict -H \""Content-Type: application/json\"" --data-binary @/payload/payload.json""],""volumeMounts"":[{""name"":""payload"",""mountPath"":""/payload""}]}]}}" 
           
           if errorlevel 1 exit /b 1
           kubectl -n arvmldevopspipeline delete configmap smoke-payload --ignore-not-found
