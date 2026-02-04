@@ -1,6 +1,7 @@
 import os
 import joblib
 import pandas as pd 
+from typing import Literal
 from fastapi import FastAPI
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -8,7 +9,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 import logging
 
-logger = logging.getLogger("uvicorn.error")Literal
+logger = logging.getLogger("uvicorn.error")
 
 app = FastAPI()
 
@@ -52,12 +53,12 @@ class PredictRequest(BaseModel):
     baseline_queue_min: float
     shortage_flag: int
     replenishment_eta_min: float
-    machine_state: Literal["RUN", "DOWN", "IDLE"]
+    machine_state: Literal["RUN"]
     queue_time_min: float
     down_minutes_last_60: float
 
 @app.post("/predict")
-def predict(payload: PredictIn):
+def predict(payload: PredictRequest):
     try:
         X = pd.DataFrame([payload.model_dump()])
         yhat = model.predict(X)
