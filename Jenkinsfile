@@ -194,7 +194,7 @@ stage('Smoke Test (/health + /predict)') {
             set NS=%NAMESPACE%
             set JOB=k6
             set CM=k6-script
-            set SCRIPT=%WORKSPACE%\\%K6_SCRIPT%
+            set SCRIPT=%WORKSPACE%\\loadtest\\k6.js
 
             if not exist "%SCRIPT%" (
               echo ERROR: k6 script not found at path: %SCRIPT%
