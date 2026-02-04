@@ -139,37 +139,31 @@ pipeline {
       }
     }
 
-    stage('Smoke Test (/health + /predict)') {
-      steps {
-        withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
-          bat '''
-            @echo on
-            setlocal EnableExtensions EnableDelayedExpansion
-            set KUBECONFIG=%KUBECONFIG_FILE%
-            set POD=curl-%BUILD_NUMBER%
+stage('Smoke Test (/health + /predict)') {
+  steps {
+    withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
+      bat '''
+        @echo on
+        setlocal EnableExtensions EnableDelayedExpansion
+        set KUBECONFIG=%KUBECONFIG_FILE%
+        set POD=curl-%BUILD_NUMBER%
 
-            kubectl -n %NAMESPACE% delete pod %POD% --ignore-not-found >nul 2>nul
+        kubectl -n %NAMESPACE% delete pod %POD% --ignore-not-found >nul 2>nul
 
-            echo ===== smoke test /health =====
-            kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- ^
-              sh -c "curl -sS -i --max-time 10 http://%SERVICE%:8000/health"
-            if errorlevel 1 exit /b 1
+        echo ===== smoke test /health =====
+        kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- sh -lc "curl -sS -i --max-time 10 http://%SERVICE%:8000/health"
+        if errorlevel 1 exit /b 1
 
-            echo ===== smoke test /predict (http=200 required, print body) =====
-            kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- ^
-              sh -c "set -e;
-                     printf '%s' '{\"event_ts\":\"2026-02-03T00:00:00Z\",\"baseline_queue_min\":1.0,\"shortage_flag\":0,\"replenishment_eta_min\":5.0,\"machine_state\":\"RUN\",\"queue_time_min\":2.0,\"down_minutes_last_60\":0.0}' > /tmp/p.json;
-                     CODE=$(curl -sS -o /tmp/body.txt -w \"%{http_code}\" --max-time 10 -X POST http://%SERVICE%:8000/predict -H \"Content-Type: application/json\" --data-binary @/tmp/p.json);
-                     echo HTTP_CODE=$CODE;
-                     cat /tmp/body.txt;
-                     test \"$CODE\" = \"200\""
-            if errorlevel 1 exit /b 1
+        echo ===== smoke test /predict (http=200 required, print body) =====
+        kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- sh -lc "set -e; JSON='{\\"event_ts\\":\\"2026-02-03T00:00:00Z\\",\\"baseline_queue_min\\":1.0,\\"shortage_flag\\":0,\\"replenishment_eta_min\\":5.0,\\"machine_state\\":\\"RUN\\",\\"queue_time_min\\":2.0,\\"down_minutes_last_60\\":0.0}'; CODE=$(curl -sS -o /tmp/body.txt -w \\"%{http_code}\\" --max-time 10 -X POST http://%SERVICE%:8000/predict -H \\"Content-Type: application/json\\" -d \\"$JSON\\"); echo HTTP_CODE=$CODE; cat /tmp/body.txt; [ \\"$CODE\\" = \\"200\\" ]"
+        if errorlevel 1 exit /b 1
 
-            endlocal
-          '''
-        }
-      }
+        endlocal
+      '''
     }
+  }
+}
+
 
     stage('Load Test (k6)') {
       steps {
