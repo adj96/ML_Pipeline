@@ -151,23 +151,11 @@ stage('Smoke Test (/health + /predict)') {
     withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
       bat '''
         @echo on
+        setlocal EnableExtensions EnableDelayedExpansion
         set KUBECONFIG=%KUBECONFIG_FILE%
         set POD=curl-%BUILD_NUMBER%
 
         kubectl -n %NAMESPACE% delete pod %POD% --ignore-not-found
-
-        echo ===== write payload.json =====
-        > payload.json (
-          echo { 
-          echo   "event_ts":"2026-02-03T00:00:00Z",
-          echo   "baseline_queue_min":1.0,
-          echo   "shortage_flag":0,
-          echo   "replenishment_eta_min":5.0,
-          echo   "machine_state":"RUN",
-          echo   "queue_time_min":2.0,
-          echo   "down_minutes_last_60":0.0
-          echo }
-        )
 
         echo ===== smoke test /health =====
         kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- ^
@@ -175,15 +163,29 @@ stage('Smoke Test (/health + /predict)') {
         if errorlevel 1 exit /b 1
 
         echo ===== smoke test /predict (must return 200) =====
-        kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- ^
-          curl -f -sS --max-time 10 -X POST http://%SERVICE%:8000/predict ^
-          -H "Content-Type: application/json" ^
-          --data-binary @payload.json
+        kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- sh -c ^
+        "cat > /tmp/payload.json << 'EOF'
+{
+  \"event_ts\": \"2026-02-03T00:00:00Z\",
+  \"baseline_queue_min\": 1.0,
+  \"shortage_flag\": 0,
+  \"replenishment_eta_min\": 5.0,
+  \"machine_state\": \"RUN\",
+  \"queue_time_min\": 2.0,
+  \"down_minutes_last_60\": 0.0
+}
+EOF
+curl -f -sS -i --max-time 10 -X POST http://%SERVICE%:8000/predict \
+  -H \"Content-Type: application/json\" \
+  --data-binary @/tmp/payload.json"
         if errorlevel 1 exit /b 1
+
+        endlocal
       '''
     }
   }
 }
+
 
 
 
