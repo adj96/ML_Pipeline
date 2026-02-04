@@ -17,6 +17,7 @@ PREPROCESSOR_LOADED = False
 CONTRACT: Optional[dict] = None
 FEATURE_COLUMNS: Optional[list] = None
 
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  
 MODEL_PATH = os.getenv("MODEL_PATH", os.path.join("models", "model.joblib"))
 
 def _infer_preprocessor_loaded(obj) -> bool:
