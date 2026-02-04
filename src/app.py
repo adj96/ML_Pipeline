@@ -20,7 +20,10 @@ class PredictRequest(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global model
-    model = joblib.load(MODEL_PATH)
+    try:
+        model = joblib.load(MODEL_PATH)
+    except Exception:
+        model = None
     yield
 
 app = FastAPI(lifespan=lifespan)
