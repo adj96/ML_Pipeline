@@ -1,63 +1,14 @@
 import os
 import joblib
 import pandas as pd
-from typing import Literal
-import logging
-
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from sklearn.pipeline import Pipeline
-from sklearn.compose import ColumnTransformer
-
-logger = logging.getLogger("uvicorn.error")
-
-app = FastAPI()
-
-# -------------------------
-# Globals (single source of truth)
-# -------------------------
-MODEL = None
-MODEL_LOADED = False
-PREPROCESSOR_LOADED = False
 
 MODEL_PATH = os.getenv("MODEL_PATH", "/app/models/model.joblib")
 
+app = FastAPI()
 
-def _infer_preprocessor_loaded(obj) -> bool:
-    if isinstance(obj, Pipeline):
-        # Pipeline may contain preprocessor + estimator
-        for _, step in obj.steps:
-            if isinstance(step, ColumnTransformer) or hasattr(step, "transform"):
-                return True
-        return False
-    if isinstance(obj, ColumnTransformer) or hasattr(obj, "transform"):
-        return True
-    return False
-
-
-@app.on_event("startup")
-def load_artifact():
-    global MODEL, MODEL_LOADED, PREPROCESSOR_LOADED
-    try:
-        MODEL = joblib.load(MODEL_PATH)
-        MODEL_LOADED = True
-        PREPROCESSOR_LOADED = _infer_preprocessor_loaded(MODEL)
-        logger.info(f"Loaded model from {MODEL_PATH}. preprocessor_loaded={PREPROCESSOR_LOADED}")
-    except Exception:
-        logger.exception(f"Failed to load model from {MODEL_PATH}")
-        MODEL = None
-        MODEL_LOADED = False
-        PREPROCESSOR_LOADED = False
-
-
-@app.get("/health")
-def health():
-    return {
-        "status": "ok",
-        "model_loaded": MODEL_LOADED,
-        "preprocessor_loaded": PREPROCESSOR_LOADED,
-        "model_path": MODEL_PATH,
-    }
+model = None  # this will be the full sklearn Pipeline (preprocess + estimator)
 
 
 class PredictRequest(BaseModel):
@@ -65,26 +16,50 @@ class PredictRequest(BaseModel):
     baseline_queue_min: float
     shortage_flag: int
     replenishment_eta_min: float
-    machine_state: Literal["RUN"]
+    machine_state: str
     queue_time_min: float
     down_minutes_last_60: float
 
 
+@app.on_event("startup")
+def load_artifacts():
+    global model
+    try:
+        model = joblib.load(MODEL_PATH)
+    except Exception as e:
+        model = None
+        raise RuntimeError(f"Failed to load model pipeline from {MODEL_PATH}: {e}")
+
+
+@app.get("/health")
+def health():
+    return {
+        "status": "ok",
+        "model_loaded": model is not None,
+        "preprocessor_loaded": model is not None,  # pipeline includes preprocessing
+        "model_path": MODEL_PATH,
+    }
+
+
 @app.post("/predict")
-def predict(payload: PredictRequest):
-    if MODEL is None or not MODEL_LOADED:
+def predict(req: PredictRequest):
+    if model is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
 
+    # Build 1-row DataFrame with the exact feature names expected by the pipeline
+    X = pd.DataFrame([{
+        "event_ts": req.event_ts,
+        "baseline_queue_min": req.baseline_queue_min,
+        "shortage_flag": req.shortage_flag,
+        "replenishment_eta_min": req.replenishment_eta_min,
+        "machine_state": req.machine_state,
+        "queue_time_min": req.queue_time_min,
+        "down_minutes_last_60": req.down_minutes_last_60,
+    }])
+
     try:
-        # keep column order stable
-        row = payload.model_dump()
-        X = pd.DataFrame([row])
-
-        # CRITICAL FIX: use MODEL (not undefined 'model')
-        yhat = MODEL.predict(X)
-
-        return {"prediction": float(yhat[0])}
-
+        yhat = model.predict(X)
+        pred = float(yhat[0])
+        return {"prediction": pred}
     except Exception as e:
-        logger.exception("Predict failed")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"Prediction failed: {e}")
