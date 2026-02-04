@@ -4,16 +4,13 @@ pipeline {
   options { timestamps() }
 
   environment {
-    // Docker Hub repo (must exist under your Docker Hub username)
     IMAGE_REPO = "arvind2733/arvmldevopspipeline"
 
-    // Kubernetes identity
     NAMESPACE  = "arvmldevopspipeline"
-    APP_NAME   = "arvmldevopspipeline"        // Deployment name
-    CONTAINER  = "arvmldevopspipeline"        // Container name in Deployment spec
-    SERVICE    = "arvmldevopspipeline-svc"    // Service name
+    APP_NAME   = "arvmldevopspipeline"
+    CONTAINER  = "arvmldevopspipeline"
+    SERVICE    = "arvmldevopspipeline-svc"
 
-    // Paths in repo
     K8S_DIR    = "k8s"
     K6_SCRIPT  = "loadtest\\k6.js"
   }
@@ -37,11 +34,9 @@ pipeline {
       steps {
         script {
           env.SHORTSHA = bat(returnStdout: true, script: '@echo off\r\ngit rev-parse --short=7 HEAD').trim()
-
           def s = bat(returnStatus: true, script: '@echo off\r\ngit describe --tags --exact-match 1> .reltag.txt 2>nul')
           env.RELTAG = (s == 0) ? readFile('.reltag.txt').trim() : ''
         }
-
         bat '''
           @echo on
           echo SHORTSHA=%SHORTSHA%
@@ -167,23 +162,11 @@ pipeline {
             kubectl -n %NAMESPACE% delete pod %POD% --ignore-not-found
 
             echo ===== smoke test /health =====
-            kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- ^
-              curl -f -sS --max-time 10 http://%SERVICE%:8000/health
+            kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- curl -f -sS --max-time 10 http://%SERVICE%:8000/health
             if errorlevel 1 exit /b 1
 
             echo ===== smoke test /predict =====
-            kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- sh -lc "cat > /tmp/payload.json << 'EOF'
-{
-  \\"event_ts\\": \\"2026-02-03T00:00:00Z\\",
-  \\"baseline_queue_min\\": 1.0,
-  \\"shortage_flag\\": 0,
-  \\"replenishment_eta_min\\": 5.0,
-  \\"machine_state\\": \\"RUN\\",
-  \\"queue_time_min\\": 2.0,
-  \\"down_minutes_last_60\\": 0.0
-}
-EOF
-curl -f -sS -i --max-time 10 -X POST http://%SERVICE%:8000/predict -H \\"Content-Type: application/json\\" --data-binary @/tmp/payload.json"
+            kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- sh -lc "printf '%s' '{\\"event_ts\\":\\"2026-02-03T00:00:00Z\\",\\"baseline_queue_min\\":1.0,\\"shortage_flag\\":0,\\"replenishment_eta_min\\":5.0,\\"machine_state\\":\\"RUN\\",\\"queue_time_min\\":2.0,\\"down_minutes_last_60\\":0.0}' > /tmp/payload.json && curl -f -sS -i --max-time 10 -X POST http://%SERVICE%:8000/predict -H \\"Content-Type: application/json\\" --data-binary @/tmp/payload.json"
             if errorlevel 1 exit /b 1
           '''
         }
@@ -273,7 +256,12 @@ curl -f -sS -i --max-time 10 -X POST http://%SERVICE%:8000/predict -H \\"Content
 
   post {
     always {
-      archiveArtifacts artifacts: 'k8s/**/*,loadtest/**/*,Dockerfile,Jenkinsfile,requirements.txt,README.md', fingerprint: true
+      bat '''
+        @echo on
+        del /q k6-job.yaml 2>nul
+        del /q payload.json 2>nul
+      '''
+      archiveArtifacts artifacts: 'k8s/**/*,loadtest/**/*,Dockerfile,Dockerfile.test,Jenkinsfile,requirements.txt,README.md,reports/**/*', fingerprint: true
     }
   }
 }
