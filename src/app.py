@@ -14,6 +14,8 @@ MODEL_LOADED = False
 PREPROCESSOR_LOADED = False
 
 MODEL_PATH = os.getenv("MODEL_PATH", os.path.join("models", "model.joblib"))
+_obj = joblib.load(MODEL_PATH)
+MODEL = _obj["pipeline"] if isinstance(_obj, dict) else _obj
 
 def _infer_preprocessor_loaded(obj) -> bool:
     if isinstance(obj, Pipeline):
