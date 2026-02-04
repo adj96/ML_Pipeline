@@ -1,5 +1,5 @@
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import joblib
 import pandas as pd
@@ -12,23 +12,14 @@ app = FastAPI(title="ML Pipeline Service", version="1.0.0")
 
 model = None
 preprocessor = None
-expected_input_columns = None
+expected_input_columns = []
 
 
 def _infer_expected_columns(obj) -> Optional[list]:
-    """
-    Try to infer expected raw input columns from common sklearn objects.
-    Works for:
-    - Pipeline: uses feature_names_in_ if present
-    - Estimator: feature_names_in_
-    - ColumnTransformer: feature_names_in_
-    """
-    for candidate in [obj]:
-        cols = getattr(candidate, "feature_names_in_", None)
-        if cols is not None:
-            return list(cols)
+    cols = getattr(obj, "feature_names_in_", None)
+    if cols is not None:
+        return list(cols)
 
-    # sklearn Pipeline: look for first step with feature_names_in_
     steps = getattr(obj, "steps", None)
     if steps:
         for _, step in steps:
@@ -39,35 +30,72 @@ def _infer_expected_columns(obj) -> Optional[list]:
     return None
 
 
-def _split_model_preprocessor(obj):
+def _extract_objects(loaded: Any) -> Tuple[Any, Any]:
     """
-    If the joblib contains a dict like {"model":..., "preprocessor":...}, use it.
-    Else treat obj as a single pipeline model.
+    Robust extraction:
+    - If loaded is dict:
+        - preprocessor: try common keys
+        - model: try common keys
+        - else if dict has single value -> treat as model
+        - else if dict has sklearn pipeline under unknown key -> pick first non-preprocessor-like object
+    - Else: loaded is the model/pipeline
     """
-    if isinstance(obj, dict):
-        m = obj.get("model", None)
-        p = obj.get("preprocessor", None)
+    if not isinstance(loaded, dict):
+        return loaded, None
+
+    # preprocessor keys (optional)
+    pre_keys = ["preprocessor", "transformer", "column_transformer", "ct", "prep"]
+    p = None
+    for k in pre_keys:
+        if k in loaded:
+            p = loaded.get(k)
+            break
+
+    # model keys (many possible)
+    model_keys = ["model", "pipeline", "estimator", "clf", "classifier", "regressor", "rf", "xgb", "svc"]
+    m = None
+    for k in model_keys:
+        if k in loaded:
+            m = loaded.get(k)
+            break
+
+    # if still not found, and dict has exactly 1 value, use it as model
+    if m is None and len(loaded) == 1:
+        m = list(loaded.values())[0]
         return m, p
-    return obj, None
+
+    # if still not found, pick first object that looks like it can predict
+    if m is None:
+        for v in loaded.values():
+            if hasattr(v, "predict"):
+                m = v
+                break
+
+    return m, p
 
 
 @app.on_event("startup")
 def startup_load():
     global model, preprocessor, expected_input_columns
 
-    loaded = joblib.load(MODEL_PATH)
-    model, preprocessor = _split_model_preprocessor(loaded)
+    try:
+        loaded = joblib.load(MODEL_PATH)
+        model, preprocessor = _extract_objects(loaded)
 
-    # Prefer columns from preprocessor if available, else from model/pipeline
-    expected_input_columns = None
-    if preprocessor is not None:
-        expected_input_columns = _infer_expected_columns(preprocessor)
-    if expected_input_columns is None:
-        expected_input_columns = _infer_expected_columns(model)
+        cols = None
+        if preprocessor is not None:
+            cols = _infer_expected_columns(preprocessor)
+        if cols is None and model is not None:
+            cols = _infer_expected_columns(model)
 
-    # Fallback: unknown, we will use incoming keys
-    if expected_input_columns is None:
+        expected_input_columns = cols if cols is not None else []
+
+    except Exception as e:
+        # Keep service alive so /health exposes the failure reason
+        model = None
+        preprocessor = None
         expected_input_columns = []
+        app.state.startup_error = str(e)
 
 
 @app.get("/health")
@@ -78,29 +106,26 @@ def health():
         "preprocessor_loaded": preprocessor is not None,
         "model_path": MODEL_PATH,
         "expected_columns_known": bool(expected_input_columns),
-        "expected_columns_count": len(expected_input_columns) if expected_input_columns is not None else 0,
+        "expected_columns_count": len(expected_input_columns),
+        "startup_error": getattr(app.state, "startup_error", None),
     }
 
 
 @app.post("/predict")
 def predict(payload: Dict[str, Any] = Body(...)):
-    """
-    Accept ANY JSON object (no strict Pydantic schema) to prevent FastAPI 422.
-    Then adapt it to the model’s expected input columns.
-
-    Rules:
-    - If expected columns are known, build a 1-row DataFrame with those columns.
-      Missing numeric -> 0, missing string/cat -> "UNKNOWN".
-    - If expected columns are unknown, use payload keys as columns.
-    """
     try:
-        if not isinstance(payload, dict):
+        if model is None:
             return JSONResponse(
-                status_code=400,
-                content={"error": "Payload must be a JSON object (key-value map)."},
+                status_code=503,
+                content={
+                    "error": "Model not loaded",
+                    "startup_error": getattr(app.state, "startup_error", None),
+                },
             )
 
-        # Determine columns
+        if not isinstance(payload, dict):
+            return JSONResponse(status_code=400, content={"error": "Payload must be a JSON object."})
+
         cols = expected_input_columns if expected_input_columns else list(payload.keys())
 
         row: Dict[str, Any] = {}
@@ -108,26 +133,20 @@ def predict(payload: Dict[str, Any] = Body(...)):
             if c in payload:
                 row[c] = payload[c]
             else:
-                # Default fillers to avoid failure
-                # Heuristic: common numeric-like fields -> 0, else "UNKNOWN"
-                if c.lower().endswith(("_min", "_sec", "_ms", "_count", "_flag", "_id")) or c.lower() in (
-                    "age", "qty", "quantity", "value", "score", "target"
-                ):
+                # safe defaults
+                if c.lower().endswith(("_min", "_sec", "_ms", "_count", "_flag", "_id")):
                     row[c] = 0
                 else:
                     row[c] = "UNKNOWN"
 
         X = pd.DataFrame([row])
 
-        # If you have separate preprocessor + model
         if preprocessor is not None:
             Xt = preprocessor.transform(X)
             y = model.predict(Xt)
         else:
-            # Assume model is a sklearn pipeline or estimator that can handle DF
             y = model.predict(X)
 
-        # Normalize output
         pred = float(y[0]) if hasattr(y, "__len__") else float(y)
         return {"prediction": pred}
 
