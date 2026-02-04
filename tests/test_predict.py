@@ -5,7 +5,7 @@ client = TestClient(app)
 
 def test_predict_ok():
     payload = {
-        "event_ts": "2026-02-03T00:00:00Z",
+        "event_ts": "2026-02-03T00:00:00",
         "priority_urgent": 0,
         "line_id": "L1",
         "product_family": "PF1",
