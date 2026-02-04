@@ -120,12 +120,17 @@ pipeline {
           bat '''
             @echo on
             set KUBECONFIG=%KUBECONFIG_FILE%
-            kubectl apply -f k8s\namespace.yaml || exit /b 1
-            kubectl apply -f k8s\deployment.yaml || exit /b 1
-            kubectl apply -f k8s\service.yaml || exit /b 1
-            
-            kubectl -n arvmldevopspipeline set image deployment/arvmldevopspipeline arvmldevopspipeline=arvind2733/arvmldevopspipeline:git-%SHORTSHA% || exit /b 1
 
+            if not exist "%K8S_DIR%\\namespace.yaml" exit /b 1
+            if not exist "%K8S_DIR%\\deployment.yaml" exit /b 1
+            if not exist "%K8S_DIR%\\service.yaml" exit /b 1
+
+            kubectl apply -f %K8S_DIR%\\namespace.yaml || exit /b 1
+            kubectl apply -f %K8S_DIR%\\deployment.yaml || exit /b 1
+            kubectl apply -f %K8S_DIR%\\service.yaml || exit /b 1
+
+            echo Setting image to: %IMAGE_REPO%:git-%SHORTSHA%
+            kubectl -n %NAMESPACE% set image deployment/%APP_NAME% %CONTAINER%=%IMAGE_REPO%:git-%SHORTSHA% || exit /b 1
           '''
         }
       }
@@ -138,7 +143,7 @@ pipeline {
             @echo on
             set KUBECONFIG=%KUBECONFIG_FILE%
 
-            kubectl -n %NAMESPACE% rollout status deployment/%APP_NAME% --timeout=180s
+            kubectl -n %NAMESPACE% rollout status deployment/%APP_NAME% --timeout=180s || exit /b 1
             kubectl -n %NAMESPACE% get pods -o wide
             kubectl -n %NAMESPACE% get svc
           '''
@@ -146,49 +151,34 @@ pipeline {
       }
     }
 
-stage('Smoke Test (/health + /predict)') {
-  steps {
-    withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
-      bat '''
-        @echo on
-        setlocal EnableExtensions EnableDelayedExpansion
-        set KUBECONFIG=%KUBECONFIG_FILE%
-        set POD=curl-%BUILD_NUMBER%
+    stage('Smoke Test (/health + /predict)') {
+      steps {
+        withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
+          bat '''
+            @echo on
+            setlocal EnableExtensions EnableDelayedExpansion
+            set KUBECONFIG=%KUBECONFIG_FILE%
+            set POD=curl-%BUILD_NUMBER%
 
-        kubectl -n %NAMESPACE% delete pod %POD% --ignore-not-found
+            kubectl -n %NAMESPACE% delete pod %POD% --ignore-not-found >nul 2>nul
 
-        echo ===== smoke test /health =====
-        kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- ^
-          curl -f -sS --max-time 10 http://%SERVICE%:8000/health
-        if errorlevel 1 exit /b 1
+            echo ===== smoke test /health =====
+            kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- ^
+              curl -f -sS --max-time 10 http://%SERVICE%:8000/health
+            if errorlevel 1 exit /b 1
 
-        echo ===== smoke test /predict (must return 200) =====
-        kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- sh -c ^
-        "cat > /tmp/payload.json << 'EOF'
-{
-  \"event_ts\": \"2026-02-03T00:00:00Z\",
-  \"baseline_queue_min\": 1.0,
-  \"shortage_flag\": 0,
-  \"replenishment_eta_min\": 5.0,
-  \"machine_state\": \"RUN\",
-  \"queue_time_min\": 2.0,
-  \"down_minutes_last_60\": 0.0
-}
-EOF
-curl -f -sS -i --max-time 10 -X POST http://%SERVICE%:8000/predict \
-  -H \"Content-Type: application/json\" \
-  --data-binary @/tmp/payload.json"
-        if errorlevel 1 exit /b 1
+            echo ===== smoke test /predict (must return 200) =====
+            kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- sh -c ^
+              "curl -f -sS -i --max-time 10 -X POST http://%SERVICE%:8000/predict \
+                -H 'Content-Type: application/json' \
+                --data '{\"event_ts\":\"2026-02-03T00:00:00Z\",\"baseline_queue_min\":1.0,\"shortage_flag\":0,\"replenishment_eta_min\":5.0,\"machine_state\":\"RUN\",\"queue_time_min\":2.0,\"down_minutes_last_60\":0.0}'"
+            if errorlevel 1 exit /b 1
 
-        endlocal
-      '''
+            endlocal
+          '''
+        }
+      }
     }
-  }
-}
-
-
-
-
 
     stage('Load Test (k6)') {
       steps {
@@ -276,7 +266,6 @@ curl -f -sS -i --max-time 10 -X POST http://%SERVICE%:8000/predict \
       bat '''
         @echo on
         del /q k6-job.yaml 2>nul
-        del /q payload.json 2>nul
       '''
       archiveArtifacts artifacts: 'k8s/**/*,loadtest/**/*,Dockerfile,Dockerfile.test,Jenkinsfile,requirements.txt,README.md,reports/**/*', fingerprint: true
     }
