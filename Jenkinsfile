@@ -151,27 +151,32 @@ pipeline {
       }
     }
 
-    stage('Smoke Test (/health + /predict)') {
-      steps {
-        withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
-          bat '''
-            @echo on
-            set KUBECONFIG=%KUBECONFIG_FILE%
-            set POD=curl-%BUILD_NUMBER%
+stage('Smoke Test (/health + /predict)') {
+  steps {
+    withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
+      bat '''
+        @echo on
+        set KUBECONFIG=%KUBECONFIG_FILE%
+        set POD=curl-%BUILD_NUMBER%
 
-            kubectl -n %NAMESPACE% delete pod %POD% --ignore-not-found
+        kubectl -n %NAMESPACE% delete pod %POD% --ignore-not-found
 
-            echo ===== smoke test /health =====
-            kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- curl -f -sS --max-time 10 http://%SERVICE%:8000/health
-            if errorlevel 1 exit /b 1
+        echo ===== smoke test /health =====
+        kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- ^
+          curl -f -sS --max-time 10 http://%SERVICE%:8000/health
+        if errorlevel 1 exit /b 1
 
-            echo ===== smoke test /predict =====
-            kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- sh -lc "printf '%s' '{\\"event_ts\\":\\"2026-02-03T00:00:00Z\\",\\"baseline_queue_min\\":1.0,\\"shortage_flag\\":0,\\"replenishment_eta_min\\":5.0,\\"machine_state\\":\\"RUN\\",\\"queue_time_min\\":2.0,\\"down_minutes_last_60\\":0.0}' > /tmp/payload.json && curl -f -sS -i --max-time 10 -X POST http://%SERVICE%:8000/predict -H \\"Content-Type: application/json\\" --data-binary @/tmp/payload.json"
-            if errorlevel 1 exit /b 1
-          '''
-        }
-      }
+        echo ===== smoke test /predict =====
+        kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- ^
+          curl -f -sS -i --max-time 10 -X POST http://%SERVICE%:8000/predict ^
+          -H "Content-Type: application/json" ^
+          --data-raw "{\"event_ts\":\"2026-02-03T00:00:00Z\",\"baseline_queue_min\":1.0,\"shortage_flag\":0,\"replenishment_eta_min\":5.0,\"machine_state\":\"RUN\",\"queue_time_min\":2.0,\"down_minutes_last_60\":0.0}"
+        if errorlevel 1 exit /b 1
+      '''
     }
+  }
+}
+
 
     stage('Load Test (k6)') {
       steps {
