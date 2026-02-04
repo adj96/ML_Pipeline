@@ -166,20 +166,13 @@ stage('Smoke Test (/health + /predict)') {
           curl -f -sS --max-time 10 http://arvmldevopspipeline-svc:8000/health
         if errorlevel 1 exit /b 1
 
-        echo ===== smoke test /predict =====
-        (echo {^
-"event_ts":"2026-02-03T00:00:00Z",^
-"baseline_queue_min":1.0,^
-"shortage_flag":0,^
-"replenishment_eta_min":5.0,^
-"machine_state":"RUN",^
-"queue_time_min":2.0,^
-"down_minutes_last_60":0.0^
-}) > payload.json
-
-        kubectl -n arvmldevopspipeline run curl-81 --rm -i --restart=Never --image=curlimages/curl -- sh -lc ^
-          "curl -f -sS --max-time 10 -H \\"Content-Type: application/json\\" -X POST http://arvmldevopspipeline-svc:8000/predict --data-binary @payload.json"
-        if errorlevel 1 exit /b 1
+       echo ===== smoke test /predict =====
+kubectl -n %NAMESPACE% run curl-81 --rm -i --restart=Never --image=curlimages/curl -- ^
+  curl -f -sS --max-time 10 ^
+  -H "Content-Type: application/json" ^
+  -X POST http://%SERVICE%:8000/predict ^
+  -d "{\"event_ts\":\"2026-02-03T00:00:00Z\",\"baseline_queue_min\":1.0,\"shortage_flag\":0,\"replenishment_eta_min\":5.0,\"machine_state\":\"RUN\",\"queue_time_min\":2.0,\"down_minutes_last_60\":0.0}"
+if errorlevel 1 exit /b 1
       """
     }
   }
