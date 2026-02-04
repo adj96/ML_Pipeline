@@ -1,16 +1,15 @@
 import os
 import joblib
-import pandas as pd
+import pandas as pd  # <-- ADD THIS
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from typing import Literal
 
 app = FastAPI()
 
-ARTIFACT = None           # can be dict or estimator
-MODEL = None              # must be estimator/pipeline with .predict
+MODEL = None
 MODEL_LOADED = False
 PREPROCESSOR_LOADED = False
 
@@ -28,48 +27,21 @@ def _infer_preprocessor_loaded(obj) -> bool:
 
 @app.on_event("startup")
 def load_artifact():
-    global ARTIFACT, MODEL, MODEL_LOADED, PREPROCESSOR_LOADED
+    global MODEL, MODEL_LOADED, PREPROCESSOR_LOADED
     try:
-        ARTIFACT = joblib.load(MODEL_PATH)
-
-        # HARD LOGGING (startup proof)
-        print("MODEL_PATH =", MODEL_PATH, flush=True)
-        print("ARTIFACT_TYPE =", type(ARTIFACT), flush=True)
-        print("ARTIFACT_IS_DICT =", isinstance(ARTIFACT, dict), flush=True)
-        if isinstance(ARTIFACT, dict):
-            print("ARTIFACT_KEYS =", list(ARTIFACT.keys()), flush=True)
-
-        # dict artifact -> extract pipeline
-        if isinstance(ARTIFACT, dict):
-            if "pipeline" not in ARTIFACT:
-                raise RuntimeError("model.joblib is dict but missing key: 'pipeline'")
-            MODEL = ARTIFACT["pipeline"]
-        else:
-            MODEL = ARTIFACT
-
-        # log final MODEL object used for prediction
-        print("MODEL_TYPE =", type(MODEL), flush=True)
-        print("MODEL_HAS_PREDICT =", hasattr(MODEL, "predict"), flush=True)
-
-        if not hasattr(MODEL, "predict"):
-            raise RuntimeError("Loaded MODEL does not have predict()")
-
+        MODEL = joblib.load(MODEL_PATH)
         MODEL_LOADED = True
         PREPROCESSOR_LOADED = _infer_preprocessor_loaded(MODEL)
-
-    except Exception as e:
-        print("MODEL_LOAD_FAILED =", str(e), flush=True)
-        ARTIFACT = None
+    except Exception:
         MODEL = None
         MODEL_LOADED = False
         PREPROCESSOR_LOADED = False
-        
+
 @app.get("/health")
 def health():
     return {
         "status": "ok",
         "model_loaded": MODEL_LOADED,
-        "preprocessor_loaded": PREPROCESSOR_LOADED,
     }
 
 class PredictRequest(BaseModel):
@@ -105,7 +77,7 @@ def predict(req: PredictRequest):
 
     try:
         X = pd.DataFrame([req.model_dump()])
-        y = MODEL.predict(X)   # 반드시 pipeline/estimator에만 predict 호출
+        y = MODEL.predict(X)
         return {"prediction": float(y[0])}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
