@@ -1,14 +1,12 @@
 import os
 import joblib
 import pandas as pd
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 MODEL_PATH = os.getenv("MODEL_PATH", "/app/models/model.joblib")
-
-app = FastAPI()
-model = None  # full sklearn Pipeline (preprocess + estimator)
-
+model = None  # sklearn Pipeline (preprocess + estimator)
 
 class PredictRequest(BaseModel):
     event_ts: str
@@ -19,12 +17,13 @@ class PredictRequest(BaseModel):
     queue_time_min: float
     down_minutes_last_60: float
 
-
-@app.on_event("startup")
-def load_artifacts():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     global model
     model = joblib.load(MODEL_PATH)
+    yield
 
+app = FastAPI(lifespan=lifespan)
 
 @app.get("/health")
 def health():
@@ -34,7 +33,6 @@ def health():
         "preprocessor_loaded": model is not None,
         "model_path": MODEL_PATH,
     }
-
 
 @app.post("/predict")
 def predict(req: PredictRequest):
