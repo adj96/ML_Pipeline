@@ -166,8 +166,7 @@ stage('Smoke Test (/health + /predict)') {
           curl -f -sS --max-time 10 http://arvmldevopspipeline-svc:8000/health
         if errorlevel 1 exit /b 1
 
-       echo ===== smoke test /predict =====
-kubectl -n %NAMESPACE% run curl-81 --rm -i --restart=Never --image=curlimages/curl -- ^
+      kubectl -n %NAMESPACE% run curl-81 --rm -i --restart=Never --image=curlimages/curl -- ^
   curl -f -sS --max-time 10 ^
   -H "Content-Type: application/json" ^
   -X POST http://%SERVICE%:8000/predict ^
