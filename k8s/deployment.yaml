@@ -21,32 +21,31 @@ spec:
     spec:
       containers:
         - name: arvmldevopspipeline
-          image: arvmldevopspipeline:24126
+          image: arvind2733/arvmldevopspipeline:git-placeholder
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 8000
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: 8000
-          initialDelaySeconds: 5
-          periodSeconds: 10
-          timeoutSeconds: 2
-          failureThreshold: 3
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 8000
-          initialDelaySeconds: 15
-          periodSeconds: 20
-          timeoutSeconds: 2
-          failureThreshold: 3
-        resources:
-          requests:
-            cpu: "100m"
-            memory: "256Mi"
-          limits:
-            cpu: "500m"
-            memory: "512Mi"
-
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
