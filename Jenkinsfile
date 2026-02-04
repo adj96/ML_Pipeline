@@ -51,28 +51,28 @@ pipeline {
     }
 
     stage('QA (Unit Tests)') {
-  steps {
-    bat '''
-      @echo on
-      if not exist reports mkdir reports
+      steps {
+        bat '''
+          @echo on
+          if not exist reports mkdir reports
 
-      docker build -t %IMAGE_REPO%:test-%SHORTSHA% -f Dockerfile.test .
+          docker build -t %IMAGE_REPO%:test-%SHORTSHA% -f Dockerfile.test .
 
-      docker create --name testrun %IMAGE_REPO%:test-%SHORTSHA%
-      docker start -a testrun
+          docker create --name testrun %IMAGE_REPO%:test-%SHORTSHA%
+          docker start -a testrun
 
-      docker cp testrun:/app/reports/test-results.xml "%WORKSPACE%\\reports\\test-results.xml"
-      docker rm -f testrun
-    '''
-  }
-  post {
-    always {
-      junit 'reports/test-results.xml'
-      archiveArtifacts artifacts: 'reports/test-results.xml', fingerprint: true
-      bat 'docker image rm -f %IMAGE_REPO%:test-%SHORTSHA% 2>nul || exit /b 0'
+          docker cp testrun:/app/reports/test-results.xml "%WORKSPACE%\\reports\\test-results.xml"
+          docker rm -f testrun
+        '''
+      }
+      post {
+        always {
+          junit 'reports/test-results.xml'
+          archiveArtifacts artifacts: 'reports/test-results.xml', fingerprint: true
+          bat 'docker image rm -f %IMAGE_REPO%:test-%SHORTSHA% 2>nul || exit /b 0'
+        }
+      }
     }
-  }
-}
 
     stage('Build Image') {
       steps {
@@ -156,30 +156,39 @@ pipeline {
       }
     }
 
-stage('Smoke Test (/health + /predict)') {
-  steps {
-    withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
-      bat '''
-        @echo on
-        set KUBECONFIG=%KUBECONFIG_FILE%
-        set POD=curl-%BUILD_NUMBER%
+    stage('Smoke Test (/health + /predict)') {
+      steps {
+        withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
+          bat '''
+            @echo on
+            set KUBECONFIG=%KUBECONFIG_FILE%
+            set POD=curl-%BUILD_NUMBER%
 
-        kubectl -n %NAMESPACE% delete pod %POD% --ignore-not-found
+            kubectl -n %NAMESPACE% delete pod %POD% --ignore-not-found
 
-        echo ===== smoke test /health =====
-        kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- \
-          curl -f -sS --max-time 10 http://%SERVICE%:8000/health
-        if errorlevel 1 exit /b 1
+            echo ===== smoke test /health =====
+            kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- ^
+              curl -f -sS --max-time 10 http://%SERVICE%:8000/health
+            if errorlevel 1 exit /b 1
 
-       echo ===== smoke test /predict =====
-      kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- sh -lc ^
-      "curl -sS -i --max-time 10 -X POST http://%SERVICE%:8000/predict -H 'Content-Type: application/json' -d '{\"event_ts\":\"2026-02-03T00:00:00Z\",\"baseline_queue_min\":1.0,\"shortage_flag\":0,\"replenishment_eta_min\":5.0,\"machine_state\":\"RUN\",\"queue_time_min\":2.0,\"down_minutes_last_60\":0.0}' ; exit_code=$?; echo; exit $exit_code"
-      '''
-    }
-  }
+            echo ===== smoke test /predict =====
+            kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- sh -lc "cat > /tmp/payload.json << 'EOF'
+{
+  \\"event_ts\\": \\"2026-02-03T00:00:00Z\\",
+  \\"baseline_queue_min\\": 1.0,
+  \\"shortage_flag\\": 0,
+  \\"replenishment_eta_min\\": 5.0,
+  \\"machine_state\\": \\"RUN\\",
+  \\"queue_time_min\\": 2.0,
+  \\"down_minutes_last_60\\": 0.0
 }
-
-
+EOF
+curl -f -sS -i --max-time 10 -X POST http://%SERVICE%:8000/predict -H \\"Content-Type: application/json\\" --data-binary @/tmp/payload.json"
+            if errorlevel 1 exit /b 1
+          '''
+        }
+      }
+    }
 
     stage('Load Test (k6)') {
       steps {
@@ -268,4 +277,3 @@ stage('Smoke Test (/health + /predict)') {
     }
   }
 }
-
