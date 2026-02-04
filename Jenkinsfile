@@ -167,11 +167,12 @@ pipeline {
               curl -f -sS --max-time 10 http://%SERVICE%:8000/health
             if errorlevel 1 exit /b 1
 
-            echo ===== smoke test /predict (must return 200) =====
+            echo ===== smoke test /predict (stdin JSON, avoids quoting bugs) =====
             kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- sh -c ^
-              "curl -f -sS -i --max-time 10 -X POST http://%SERVICE%:8000/predict \
-                -H 'Content-Type: application/json' \
-                --data '{\"event_ts\":\"2026-02-03T00:00:00Z\",\"baseline_queue_min\":1.0,\"shortage_flag\":0,\"replenishment_eta_min\":5.0,\"machine_state\":\"RUN\",\"queue_time_min\":2.0,\"down_minutes_last_60\":0.0}'"
+              "printf '%%s' '{\"event_ts\":\"2026-02-03T00:00:00Z\",\"baseline_queue_min\":1.0,\"shortage_flag\":0,\"replenishment_eta_min\":5.0,\"machine_state\":\"RUN\",\"queue_time_min\":2.0,\"down_minutes_last_60\":0.0}' | \
+               curl -f -sS -i --max-time 10 -X POST http://%SERVICE%:8000/predict \
+               -H \"Content-Type: application/json\" \
+               --data-binary @-"
             if errorlevel 1 exit /b 1
 
             endlocal
@@ -198,18 +199,14 @@ pipeline {
               exit /b 1
             )
 
-            echo ===== k6: cleanup old resources =====
             kubectl -n %NS% delete job %JOB% --ignore-not-found
             kubectl -n %NS% delete configmap %CM% --ignore-not-found
 
-            echo ===== k6: create configmap from script =====
             kubectl -n %NS% create configmap %CM% --from-file=k6.js="%SCRIPT%" || exit /b 1
 
-            echo ===== validate service/endpoints =====
             kubectl -n %NS% get svc %SERVICE% -o wide || exit /b 1
             kubectl -n %NS% get endpointslice -l kubernetes.io/service-name=%SERVICE% -o wide || exit /b 1
 
-            echo ===== k6: create job manifest =====
             (
               echo apiVersion: batch/v1
               echo kind: Job
@@ -242,18 +239,15 @@ pipeline {
 
             kubectl apply -f k6-job.yaml || exit /b 1
 
-            echo ===== k6: wait for completion (5 min) =====
             kubectl -n %NS% wait --for=condition=complete job/%JOB% --timeout=300s
             set RC=%ERRORLEVEL%
 
             if not "%RC%"=="0" (
-              echo ===== k6: FAILED - debugging =====
               kubectl -n %NS% describe job/%JOB%
               kubectl -n %NS% logs -l app=k6 --tail=-1
               exit /b 1
             )
 
-            echo ===== k6: SUCCESS - final logs =====
             kubectl -n %NS% logs -l app=k6 --tail=-1
           '''
         }
