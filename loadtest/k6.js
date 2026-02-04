@@ -20,8 +20,8 @@ export default function () {
   const h = http.get(`${BASE_URL}/health`);
   check(h, {
     "health status is 200": (r) => r.status === 200,
-    "health has ok payload": (r) => (r.json("status") === "ok"),
-    "health model_loaded true": (r) => (r.json("model_loaded") === true),
+    "health has ok payload": (r) => r.json("status") === "ok",
+    "health model_loaded true": (r) => r.json("model_loaded") === true,
   });
 
   const payload = JSON.stringify({
