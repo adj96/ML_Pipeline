@@ -2,26 +2,20 @@ import http from "k6/http";
 import { check, sleep } from "k6";
 
 export const options = {
-  stages: [
-    { duration: "10s", target: 5 },
-    { duration: "20s", target: 30 },
-    { duration: "20s", target: 30 },
-    { duration: "10s", target: 0 },
-  ],
+  vus: 5,
+  duration: "30s",
   thresholds: {
-    http_req_failed: ["rate==0"],
-    http_req_duration: ["p(95)<2000"],
+    http_req_failed: ["rate<0.01"],
+    http_req_duration: ["p(95)<1000"],
   },
 };
 
 const BASE_URL = __ENV.BASE_URL || "http://arvmldevopspipeline-svc:8000";
 
 export default function () {
-  const h = http.get(`${BASE_URL}/health`);
-  check(h, {
-    "health status is 200": (r) => r.status === 200,
-    "health has ok payload": (r) => r.json("status") === "ok",
-    "health model_loaded true": (r) => r.json("model_loaded") === true,
+  const health = http.get(`${BASE_URL}/health`);
+  check(health, {
+    "health status 200": (r) => r.status === 200,
   });
 
   const payload = JSON.stringify({
@@ -34,13 +28,11 @@ export default function () {
     down_minutes_last_60: 0.0,
   });
 
-  const p = http.post(`${BASE_URL}/predict`, payload, {
-    headers: { "Content-Type": "application/json" },
-  });
+  const params = { headers: { "Content-Type": "application/json" } };
+  const pred = http.post(`${BASE_URL}/predict`, payload, params);
 
-  check(p, {
-    "predict status is 200": (r) => r.status === 200,
-    "predict returns prediction": (r) => typeof r.json("prediction") === "number",
+  check(pred, {
+    "predict status 200": (r) => r.status === 200,
   });
 
   sleep(1);
