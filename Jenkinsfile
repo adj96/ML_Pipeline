@@ -172,45 +172,14 @@ stage('Smoke Test (/health + /predict)') {
         if errorlevel 1 exit /b 1
 
         echo ===== smoke test /predict =====
-        kubectl -n arvmldevopspipeline delete pod %POD% --ignore-not-found
-        
-        > payload.json (
-          echo {^
-          "event_ts":"2026-02-03T00:00:00Z",^
-          "priority_urgent":0,^
-          "line_id":"L1",^
-          "product_family":"PF1",^
-          "station":"ST01",^
-          "shift":"A",^
-          "remaining_units":10,^
-          "queue_time_min":2.0,^
-          "queue_length":2,^
-          "machine_state":"RUN",^
-          "down_minutes_last_60":0.0,^
-          "alarm_rate_last_30":0.0,^
-          "cycle_time_expected_sec":12.0,^
-          "cycle_time_actual_sec":12.5,^
-          "cycle_time_deviation":0.5,^
-          "shortage_flag":0,^
-          "replenishment_eta_min":5.0,^
-          "shortage_severity":0,^
-          "operator_present":1,^
-          "skill_level":"S1",^
-          "coverage_ratio":1.0,^
-          "baseline_queue_min":1.0,^
-          "station_backlog_ratio":0.2,^
-          "delay_flag":0^
-          }
-        )
+        set PAYLOAD={"event_ts":"2026-02-03T00:00:00Z","priority_urgent":0,"line_id":"L1","product_family":"PF1","station":"ST01","shift":"A","remaining_units":10,"queue_time_min":2.0,"queue_length":2,"machine_state":"RUN","down_minutes_last_60":0.0,"alarm_rate_last_30":0.0,"cycle_time_expected_sec":12.0,"cycle_time_actual_sec":12.5,"cycle_time_deviation":0.5,"shortage_flag":0,"replenishment_eta_min":5.0,"shortage_severity":0,"operator_present":1,"skill_level":"S1","coverage_ratio":1.0,"baseline_queue_min":1.0,"station_backlog_ratio":0.2,"delay_flag":0}
 
-          kubectl -n arvmldevopspipeline create configmap smoke-payload --from-file=payload.json -o yaml --dry-run=client | kubectl apply -f -
-          
-    kubectl -n arvmldevopspipeline run curl-127 --rm -i --restart=Never --image=curlimages/curl ^
-  --overrides="{""apiVersion"":""v1"",""spec"":{""volumes"":[{""name"":""payload"",""configMap"":{""name"":""smoke-payload""}}],""containers"":[{""name"":""curl"",""image"":""curlimages/curl"",""command"":[""sh"",""-lc"",""curl -f -sS -X POST http://arvmldevopspipeline-svc:8000/predict -H \""Content-Type: application/json\"" --data-binary @/payload/payload.json""],""volumeMounts"":[{""name"":""payload"",""mountPath"":""/payload""}]}]}}" 
-          
-          if errorlevel 1 exit /b 1
-          kubectl -n arvmldevopspipeline delete configmap smoke-payload --ignore-not-found
-          del payload.json
+        kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- ^
+        curl -f -sS --max-time 15 -X POST http://%SERVICE%:8000/predict -H "Content-Type: application/json" -d "%PAYLOAD%"
+        if errorlevel 1 exit /b 1
+        
+        kubectl -n arvmldevopspipeline delete configmap smoke-payload --ignore-not-found
+      
       '''
     }
   }
