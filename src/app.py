@@ -9,6 +9,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
+from datetime import datetime
 
 app = FastAPI()
 
@@ -119,7 +120,7 @@ def health():
 
 
 class PredictRequest(BaseModel):
-    event_ts: str
+    event_ts: datetime
     priority_urgent: int = Field(ge=0, le=1)
     line_id: str
     product_family: str
