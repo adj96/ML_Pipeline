@@ -6,10 +6,11 @@ from pydantic import BaseModel, Field
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from typing import Literal, Any, Dict, Optional
+import threading
+import traceback
 
 app = FastAPI()
 
-# Loaded artifact wrapper (dict) + unwrapped pipeline
 ARTIFACT: Optional[Dict[str, Any]] = None
 MODEL = None
 
@@ -23,6 +24,10 @@ METRICS: Optional[Dict[str, Any]] = None
 
 MODEL_PATH = os.getenv("MODEL_PATH", os.path.join("models", "model.joblib"))
 
+_load_lock = threading.Lock()
+_load_attempted = False
+
+
 def _infer_preprocessor_loaded(obj) -> bool:
     if isinstance(obj, Pipeline):
         for _, step in obj.steps:
@@ -33,56 +38,92 @@ def _infer_preprocessor_loaded(obj) -> bool:
         return True
     return False
 
-@app.on_event("startup")
-def load_artifact():
+
+def _reset_state():
     global ARTIFACT, MODEL
     global MODEL_LOADED, PREPROCESSOR_LOADED
     global CONTRACT, CONFIG, BEST_PARAMS, METRICS
 
+    ARTIFACT = None
+    MODEL = None
+    CONTRACT = None
+    CONFIG = None
+    BEST_PARAMS = None
+    METRICS = None
+    MODEL_LOADED = False
+    PREPROCESSOR_LOADED = False
+
+
+def load_artifact_or_raise() -> None:
+    """
+    Loads model.joblib. Your artifact is expected to be either:
+      - dict wrapper with key "pipeline"
+      - raw sklearn estimator/pipeline with predict()
+    """
+    global ARTIFACT, MODEL
+    global MODEL_LOADED, PREPROCESSOR_LOADED
+    global CONTRACT, CONFIG, BEST_PARAMS, METRICS
+    global _load_attempted
+
+    with _load_lock:
+        if MODEL_LOADED and MODEL is not None:
+            return
+
+        _load_attempted = True
+        try:
+            loaded = joblib.load(MODEL_PATH)
+
+            if isinstance(loaded, dict):
+                ARTIFACT = loaded
+                MODEL = loaded.get("pipeline")
+                CONTRACT = loaded.get("contract")
+                CONFIG = loaded.get("config")
+                BEST_PARAMS = loaded.get("best_params")
+                METRICS = loaded.get("metrics")
+            else:
+                ARTIFACT = None
+                MODEL = loaded
+                CONTRACT = None
+                CONFIG = None
+                BEST_PARAMS = None
+                METRICS = None
+
+            if MODEL is None or not hasattr(MODEL, "predict"):
+                raise RuntimeError("model.joblib missing valid 'pipeline' with predict().")
+
+            MODEL_LOADED = True
+            PREPROCESSOR_LOADED = _infer_preprocessor_loaded(MODEL)
+
+        except Exception as e:
+            _reset_state()
+            # critical: surface the real root cause in logs
+            print(f"[MODEL_LOAD_ERROR] path={MODEL_PATH} err={repr(e)}")
+            traceback.print_exc()
+            raise
+
+
+@app.on_event("startup")
+def startup_load():
+    # Best-effort startup load, but do not crash server; health will show false if it fails.
     try:
-        loaded = joblib.load(MODEL_PATH)
-
-        # Unwrap dict wrapper
-        if isinstance(loaded, dict):
-            ARTIFACT = loaded
-            MODEL = loaded.get("pipeline")
-            CONTRACT = loaded.get("contract")
-            CONFIG = loaded.get("config")
-            BEST_PARAMS = loaded.get("best_params")
-            METRICS = loaded.get("metrics")
-        else:
-            ARTIFACT = None
-            MODEL = loaded
-            CONTRACT = None
-            CONFIG = None
-            BEST_PARAMS = None
-            METRICS = None
-
-        if MODEL is None or not hasattr(MODEL, "predict"):
-            raise RuntimeError("model.joblib does not contain a valid 'pipeline' with predict().")
-
-        MODEL_LOADED = True
-        PREPROCESSOR_LOADED = _infer_preprocessor_loaded(MODEL)
-
+        load_artifact_or_raise()
     except Exception:
-        ARTIFACT = None
-        MODEL = None
-        CONTRACT = None
-        CONFIG = None
-        BEST_PARAMS = None
-        METRICS = None
-        MODEL_LOADED = False
-        PREPROCESSOR_LOADED = False
+        pass
+
 
 @app.get("/health")
 def health():
+    # do NOT force load here; health should report current state
     return {
         "status": "ok",
         "model_loaded": MODEL_LOADED,
         "preprocessor_loaded": PREPROCESSOR_LOADED,
         "has_contract": CONTRACT is not None,
         "feature_columns_count": len(CONTRACT.get("feature_columns", [])) if CONTRACT else None,
+        "model_path": MODEL_PATH,
+        "load_attempted": _load_attempted,
     }
+
 
 class PredictRequest(BaseModel):
     event_ts: str
@@ -110,10 +151,15 @@ class PredictRequest(BaseModel):
     station_backlog_ratio: float = Field(ge=0)
     delay_flag: int = Field(ge=0, le=1)
 
+
 @app.post("/predict")
 def predict(req: PredictRequest):
+    # Guarantee model is available even if startup didn’t fire in TestClient
     if not MODEL_LOADED or MODEL is None:
-        raise HTTPException(status_code=503, detail="model not loaded")
+        try:
+            load_artifact_or_raise()
+        except Exception as e:
+            raise HTTPException(status_code=503, detail=f"model not loaded: {repr(e)}")
 
     try:
         X = pd.DataFrame([req.model_dump()])
