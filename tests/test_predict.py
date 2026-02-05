@@ -3,7 +3,7 @@ from src.app import app
 
 def test_predict_ok():
     payload = {
-        "event_ts": "2026-02-03T00:00:00",
+        "event_ts": "20260203",
         "priority_urgent": 0,
         "line_id": "L1",
         "product_family": "PF1",
