@@ -177,8 +177,6 @@ stage('Smoke Test (/health + /predict)') {
         kubectl -n %NAMESPACE% run %POD% --rm -i --restart=Never --image=curlimages/curl -- ^
         curl -f -sS --max-time 15 -X POST http://%SERVICE%:8000/predict -H "Content-Type: application/json" -d "%PAYLOAD%"
         if errorlevel 1 exit /b 1
-        
-        kubectl -n arvmldevopspipeline delete configmap smoke-payload --ignore-not-found
       
       '''
     }
