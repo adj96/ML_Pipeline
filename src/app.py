@@ -162,8 +162,18 @@ def predict(req: PredictRequest):
             raise HTTPException(status_code=503, detail=f"model not loaded: {repr(e)}")
 
     try:
-        X = pd.DataFrame([req.model_dump()])
+        data = req.model_dump()
+
+        # convert event_ts string -> numeric epoch seconds (float)
+        ts = pd.to_datetime(data["event_ts"], errors="coerce", utc=True)
+        if pd.isna(ts):
+            raise HTTPException(status_code=422, detail="event_ts invalid datetime format")
+        data["event_ts"] = float(ts.timestamp())
+
+        X = pd.DataFrame([data])
         y = MODEL.predict(X)
         return {"prediction": float(y[0])}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
