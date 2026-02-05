@@ -1,8 +1,6 @@
 from fastapi.testclient import TestClient
 from src.app import app
 
-client = TestClient(app)
-
 def test_predict_ok():
     payload = {
         "event_ts": "2026-02-03T00:00:00",
@@ -31,8 +29,9 @@ def test_predict_ok():
         "delay_flag": 0,
     }
 
-    res = client.post("/predict", json=payload)
-    assert res.status_code == 200, res.text
-    body = res.json()
-    assert "prediction" in body
-    assert isinstance(body["prediction"], (int, float))
+    with TestClient(app) as client:
+        res = client.post("/predict", json=payload)
+        assert res.status_code == 200, res.text
+        body = res.json()
+        assert "prediction" in body
+        assert isinstance(body["prediction"], (int, float))
