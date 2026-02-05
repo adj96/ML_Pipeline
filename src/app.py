@@ -1,17 +1,25 @@
 import os
 import joblib
-import pandas as pd  # <-- ADD THIS
+import pandas as pd
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
-from typing import Literal
+from typing import Literal, Any, Dict, Optional
 
 app = FastAPI()
 
+# Loaded artifact wrapper (dict) + unwrapped pipeline
+ARTIFACT: Optional[Dict[str, Any]] = None
 MODEL = None
+
 MODEL_LOADED = False
 PREPROCESSOR_LOADED = False
+
+CONTRACT: Optional[Dict[str, Any]] = None
+CONFIG: Optional[Dict[str, Any]] = None
+BEST_PARAMS: Optional[Dict[str, Any]] = None
+METRICS: Optional[Dict[str, Any]] = None
 
 MODEL_PATH = os.getenv("MODEL_PATH", os.path.join("models", "model.joblib"))
 
@@ -27,13 +35,42 @@ def _infer_preprocessor_loaded(obj) -> bool:
 
 @app.on_event("startup")
 def load_artifact():
-    global MODEL, MODEL_LOADED, PREPROCESSOR_LOADED
+    global ARTIFACT, MODEL
+    global MODEL_LOADED, PREPROCESSOR_LOADED
+    global CONTRACT, CONFIG, BEST_PARAMS, METRICS
+
     try:
-        MODEL = joblib.load(MODEL_PATH)
+        loaded = joblib.load(MODEL_PATH)
+
+        # Unwrap dict wrapper
+        if isinstance(loaded, dict):
+            ARTIFACT = loaded
+            MODEL = loaded.get("pipeline")
+            CONTRACT = loaded.get("contract")
+            CONFIG = loaded.get("config")
+            BEST_PARAMS = loaded.get("best_params")
+            METRICS = loaded.get("metrics")
+        else:
+            ARTIFACT = None
+            MODEL = loaded
+            CONTRACT = None
+            CONFIG = None
+            BEST_PARAMS = None
+            METRICS = None
+
+        if MODEL is None or not hasattr(MODEL, "predict"):
+            raise RuntimeError("model.joblib does not contain a valid 'pipeline' with predict().")
+
         MODEL_LOADED = True
         PREPROCESSOR_LOADED = _infer_preprocessor_loaded(MODEL)
+
     except Exception:
+        ARTIFACT = None
         MODEL = None
+        CONTRACT = None
+        CONFIG = None
+        BEST_PARAMS = None
+        METRICS = None
         MODEL_LOADED = False
         PREPROCESSOR_LOADED = False
 
@@ -42,6 +79,9 @@ def health():
     return {
         "status": "ok",
         "model_loaded": MODEL_LOADED,
+        "preprocessor_loaded": PREPROCESSOR_LOADED,
+        "has_contract": CONTRACT is not None,
+        "feature_columns_count": len(CONTRACT.get("feature_columns", [])) if CONTRACT else None,
     }
 
 class PredictRequest(BaseModel):
